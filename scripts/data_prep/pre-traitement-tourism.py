@@ -3,23 +3,39 @@ from poi import HIGH_VALUE_POI, NATURE_POI, EVENTS
 
 NAME_FILE_ATTRACTIONS = "data/raw/parcs-du-monde.csv"
 NAME_FILE_TOURISME = "data/raw/datatourisme.csv"
+# France métropolitaine
 MIN_LATITUDE = 41.0
 MAX_LATITUDE = 51.2
 MIN_LONGITUDE = -5.5
 MAX_LONGITUDE = 10.0
+# La corse, pour l'exclure :)
+CORSICA_MIN_LATITUDE = 41.2
+CORSICA_MAX_LATITUDE = 43.2
+CORSICA_MIN_LONGITUDE = 8.2
+CORSICA_MAX_LONGITUDE = 9.7
 
 
 def nettoyer_poi(df: pd.DataFrame) -> pd.DataFrame:
-    """Conserve les POI géolocalisés en France métropolitaine et dédoublonne."""
+    """Conserve les POI géolocalisés en France métropolitaine et enlever les doublons."""
     df = df.copy()
     df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
-    df = df.dropna(subset=["Latitude", "Longitude"])
+    df = df.dropna(subset=["Latitude", "Longitude"])  # valeurs manquantes
     df = df[
         df["Latitude"].between(MIN_LATITUDE, MAX_LATITUDE)
         & df["Longitude"].between(MIN_LONGITUDE, MAX_LONGITUDE)
     ].copy()
 
+    # suppression de la Corse
+    is_corsica = (
+        df["Latitude"].between(CORSICA_MIN_LATITUDE, CORSICA_MAX_LATITUDE)
+        & df["Longitude"].between(CORSICA_MIN_LONGITUDE, CORSICA_MAX_LONGITUDE)
+    )
+    df = df.loc[~is_corsica]
+
+    # Nettoyage des doublons : on considère qu'un POI est un doublon si :
+    # - il a le même identifiant (si l'identifiant est renseigné)
+    # - ou il a le même nom et les mêmes coordonnées (latitude et longitude)
     df["Identifiant"] = df["Identifiant"].astype("string").str.strip()
     df["Nom"] = df["Nom"].astype("string").str.strip()
     df = df.drop_duplicates()
@@ -58,7 +74,6 @@ def pre_traitement_attractions() -> pd.DataFrame:
     df = pd.read_csv(NAME_FILE_ATTRACTIONS)
 
     # Supprimer les lignes où le pays n'est pas la France et où une année de fermeture est renseignée
-    # (Retirez la condition sur "pays" si cette colonne n'existe plus dans votre CSV)
     masque = df["annee_fermeture"].astype("string").fillna("").str.strip().eq("")
     if "pays" in df.columns:
         masque = masque & df["pays"].astype("string").fillna("").str.strip().eq("FR")
@@ -90,7 +105,7 @@ def obtenir_types_uniques(sep: str = ",", separateur_valeurs: str = ",") -> list
         dtype="string",
     )
     
-    # Empile les deux colonnes en une seule série, nettoie et dédoublonne
+    # Empile les deux colonnes en une seule série, nettoie et enlever les doublons
     sous_types_uniques = (
         df.stack()
         .dropna()
