@@ -1,3 +1,4 @@
+from pydeck.types import String
 import pandas as pd
 import streamlit as st
 import pydeck as pdk
@@ -13,7 +14,7 @@ def map_selector():
     if st.sidebar.button("Carte par régions"):
         st.session_state.selected_map = "data/regions-50m.geojson"
     if st.sidebar.button("Gares"):
-        scatter_layer = grab_data()
+        scatter_layer = grab_station_data()
         layers.append(scatter_layer)
 
     if st.session_state.selected_map:
@@ -23,8 +24,8 @@ def map_selector():
 
 def normalize_visitors(visitors):
     # Increased minimum radius so base stations are visible at national zoom
-    min_radius = 500  
-    max_radius = 20000
+    min_radius = 3 # 500 for meters
+    max_radius = 30 # 20000 for meters
     
     # Using Square Root scaling to prevent Gare du Nord from squashing the rest of the data
     sqrt_visitors = np.sqrt(visitors)
@@ -34,7 +35,7 @@ def normalize_visitors(visitors):
     normalized_radius = ((sqrt_visitors - min_sqrt) / (max_sqrt - min_sqrt)) * (max_radius - min_radius) + min_radius
     return normalized_radius
 
-def grab_data():
+def grab_station_data():
     df= pd.read_csv("data/stations.csv", sep=",")
     df["map_radius"] = normalize_visitors(df["visitors"])
 
@@ -46,7 +47,9 @@ def grab_data():
         get_line_color=[255, 255, 255],
         line_width_min_pixels=1,
         get_radius="[map_radius]",  # Radius in meters
-        radius_max_pixels=15,
+        # radius_max_pixels=30,
+        # radius_min_pixels=3,
+        radius_units = String("pixels"),
         pickable=True,     # Allows hovering/clicking
     )
     return scatter_layer

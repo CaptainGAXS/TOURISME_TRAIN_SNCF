@@ -22,7 +22,7 @@ def render_map(mappath, layers = []):
     view_state = pdk.ViewState(latitude=46.6, longitude=2.2, zoom=4.5)
 
     custom_tooltip = {
-    "html": "<b>Gare:</b> {name} <br/> <b>Fréquentation:</b> {visitors}",
+    "html": "<b>Gare:</b> {name}",
     }
 
     deck = pdk.Deck(
