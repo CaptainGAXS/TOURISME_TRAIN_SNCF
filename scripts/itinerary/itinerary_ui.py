@@ -8,9 +8,15 @@ from datetime import date, time, timedelta
 
 import streamlit as st
 
+from carbon import car_co2, journey_co2, leg_co2
 from network import load_network
 from planner import describe, plan
 from route_map import journey_layers
+
+
+def co2_text(kg, exact):
+    """1.28 -> '1.28 kgCO2e', or '≈1.28 kgCO2e' when the distance is estimated."""
+    return f"{'' if exact else '≈'}{kg:.2f} kgCO2e"
 
 
 @st.cache_resource(show_spinner="Loading timetable (about 10 s)...")
@@ -52,7 +58,11 @@ def itinerary_sidebar():
         return []
 
     # ---- choose one journey
-    summaries = [describe(legs, stations, trips).splitlines()[0] for legs in journeys]
+    summaries = [
+        f"{describe(legs, stations, trips).splitlines()[0]} · "
+        f"{co2_text(*journey_co2(legs, stations, trips))}"
+        for legs in journeys
+    ]
     choice = st.sidebar.radio(
         "Journeys",
         range(len(journeys)),
@@ -60,6 +70,21 @@ def itinerary_sidebar():
         key="itin_choice",
     )
     legs = journeys[choice]
-    st.sidebar.code(describe(legs, stations, trips), language=None)
+    lines = describe(legs, stations, trips).splitlines()  # line 0 = summary, then 1 line per leg
+    for i, leg in enumerate(legs):
+        if leg["mode"] == "train":
+            lines[i + 1] += "  " + co2_text(*leg_co2(leg, stations, trips))
+
+    # ---- whole journey vs. car
+    train_kg, train_exact = journey_co2(legs, stations, trips)
+    car_kg, car_exact = car_co2(name_to_id[origin], name_to_id[destination], stations)
+    lines.append("")
+    lines.append(f"Total (train): {co2_text(train_kg, train_exact)}")
+    car_line = f"Car (petrol, 2.2 pers.): {co2_text(car_kg, car_exact)}"
+    if train_kg > 0:  # 0 when the journey is only walking
+        car_line += f"  (x{car_kg / train_kg:.0f})"
+    lines.append(car_line)
+    st.sidebar.code("\n".join(lines), language=None)
+    st.sidebar.caption("CO2e per traveller, SNCF factors per km. ≈ = estimated distance.")
 
     return journey_layers(legs, stations, trips)

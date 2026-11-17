@@ -3,7 +3,7 @@ Turn a journey (list of legs from planner.py) into pydeck layers.
 deck = pdk.Deck(layers=[other_layer] + journey_layers(legs, stations, trips), ...)
 """
 
-from planner import hhmm
+from planner import hhmm, leg_stations
 import pandas as pd
 import pydeck as pdk
 
@@ -23,16 +23,6 @@ OTHER_COLOR = [90, 60, 160]  # ICE, Lyria, ...
 
 # def hhmm(seconds):
 #     return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
-
-
-def leg_stations(leg, trips):
-    """Stations passed by a leg, in order (for walking: just start and end)."""
-    if leg["mode"] == "walk":
-        return [leg["from"], leg["to"]]
-    stops = trips[leg["trip"]]["stops"]
-    start = stops.index(leg["from"])
-    end = stops.index(leg["to"], start + 1)
-    return stops[start : end + 1]
 
 
 def journey_layers(legs, stations, trips):

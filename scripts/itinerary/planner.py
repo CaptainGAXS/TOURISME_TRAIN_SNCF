@@ -116,6 +116,16 @@ def plan(network, origin, destination, start_time, n=3):
     return journeys
 
 
+def leg_stations(leg, trips):
+    """Stations passed by a leg, in order (for walking: just start and end)."""
+    if leg["mode"] == "walk":
+        return [leg["from"], leg["to"]]
+    stops = trips[leg["trip"]]["stops"]
+    start = stops.index(leg["from"])
+    end = stops.index(leg["to"], start + 1)
+    return stops[start : end + 1]
+
+
 # ------------------------------------------------------------------ display
 
 
@@ -126,7 +136,7 @@ def hhmm(seconds):  # seconds -> "HH:MM" string
 def describe(legs, stations, trips):  # legs -> text lines (display)
     """Journey as text lines."""
     duration = legs[-1]["arr"] - legs[0]["dep"]
-    changes = sum(leg["mode"] == "train" for leg in legs) - 1
+    changes = max(0, sum(leg["mode"] == "train" for leg in legs) - 1)  # 0 if walking only
     lines = [
         f"{hhmm(legs[0]['dep'])} -> {hhmm(legs[-1]['arr'])}  "
         f"({duration // 3600}h{duration % 3600 // 60:02d}, {changes} transfer(s))"
