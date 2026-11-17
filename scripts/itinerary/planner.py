@@ -126,7 +126,7 @@ def leg_stations(leg, trips):
     return stops[start : end + 1]
 
 
-# ------------------------------------------------------------------ display
+### display
 
 
 def hhmm(seconds):  # seconds -> "HH:MM" string
@@ -136,7 +136,9 @@ def hhmm(seconds):  # seconds -> "HH:MM" string
 def describe(legs, stations, trips):  # legs -> text lines (display)
     """Journey as text lines."""
     duration = legs[-1]["arr"] - legs[0]["dep"]
-    changes = max(0, sum(leg["mode"] == "train" for leg in legs) - 1)  # 0 if walking only
+    changes = max(
+        0, sum(leg["mode"] == "train" for leg in legs) - 1
+    )  # 0 if walking only
     lines = [
         f"{hhmm(legs[0]['dep'])} -> {hhmm(legs[-1]['arr'])}  "
         f"({duration // 3600}h{duration % 3600 // 60:02d}, {changes} transfer(s))"

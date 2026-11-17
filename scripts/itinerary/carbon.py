@@ -61,12 +61,12 @@ def uic_pair(station_a, station_b):
 
 
 def leg_km(leg, stations, trips):
-    """(distance in km, True if official / False if estimated)."""
+    """Rail distance of a leg in km."""
     pair = uic_pair(leg["from"], leg["to"])
     if (
         pair in OFFICIAL_RAIL_KM
     ):  # in case the SNCF table has a distance for this leg, use it (more accurate than the straight line)
-        return OFFICIAL_RAIL_KM[pair], True
+        return OFFICIAL_RAIL_KM[pair]
 
     ids = leg_stations(leg, trips)
     meters = sum(
@@ -78,35 +78,28 @@ def leg_km(leg, stations, trips):
         )
         for a, b in zip(ids, ids[1:])
     )
-    return meters / 1000 * PATH_TO_RAIL, False
+    return meters / 1000 * PATH_TO_RAIL
 
 
 def leg_co2(leg, stations, trips):
-    """(kgCO2e, True if the distance is official / False if estimated)."""
+    """kgCO2e of one leg (0 for walking)."""
     if leg["mode"] == "walk":
-        return 0.0, True
-    km, exact = leg_km(leg, stations, trips)
+        return 0.0
     grams_per_km = GRAMS_PER_KM.get(trips[leg["trip"]]["kind"], OTHER_GRAMS_PER_KM)
-    return km * grams_per_km / 1000, exact
+    return leg_km(leg, stations, trips) * grams_per_km / 1000
 
 
 def journey_co2(legs, stations, trips):
-    """Whole journey: (kgCO2e, True if every distance is official)."""
-    per_leg = [leg_co2(leg, stations, trips) for leg in legs]
-    return sum(kg for kg, _ in per_leg), all(exact for _, exact in per_leg)
+    """kgCO2e of the whole journey."""
+    return sum(leg_co2(leg, stations, trips) for leg in legs)
 
 
 def car_co2(origin, destination, stations):
-    """Same trip by petrol car: (kgCO2e, True if the road distance is official)."""
+    """kgCO2e of the same trip by petrol car (origin -> destination directly)."""
     pair = uic_pair(origin, destination)
     if pair in OFFICIAL_ROAD_KM:
-        km, exact = OFFICIAL_ROAD_KM[pair], True
+        km = OFFICIAL_ROAD_KM[pair]
     else:
         a, b = stations[origin], stations[destination]
-        km, exact = (
-            distance_m(a["lat"], a["lon"], b["lat"], b["lon"])
-            / 1000
-            * STRAIGHT_TO_ROAD,
-            False,
-        )
-    return km * CAR_GRAMS_PER_KM / 1000, exact
+        km = distance_m(a["lat"], a["lon"], b["lat"], b["lon"]) / 1000 * STRAIGHT_TO_ROAD
+    return km * CAR_GRAMS_PER_KM / 1000

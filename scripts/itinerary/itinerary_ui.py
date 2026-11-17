@@ -14,9 +14,9 @@ from planner import describe, plan
 from route_map import journey_layers
 
 
-def co2_text(kg, exact):
-    """1.28 -> '1.28 kgCO2e', or '≈1.28 kgCO2e' when the distance is estimated."""
-    return f"{'' if exact else '≈'}{kg:.2f} kgCO2e"
+def co2_text(kg):
+    """1.2845 -> '1.28 kgCO2e'"""
+    return f"{kg:.2f} kgCO2e"
 
 
 @st.cache_resource(show_spinner="Loading timetable (about 10 s)...")
@@ -60,7 +60,7 @@ def itinerary_sidebar():
     # ---- choose one journey
     summaries = [
         f"{describe(legs, stations, trips).splitlines()[0]} · "
-        f"{co2_text(*journey_co2(legs, stations, trips))}"
+        f"{co2_text(journey_co2(legs, stations, trips))}"
         for legs in journeys
     ]
     choice = st.sidebar.radio(
@@ -73,18 +73,18 @@ def itinerary_sidebar():
     lines = describe(legs, stations, trips).splitlines()  # line 0 = summary, then 1 line per leg
     for i, leg in enumerate(legs):
         if leg["mode"] == "train":
-            lines[i + 1] += "  " + co2_text(*leg_co2(leg, stations, trips))
+            lines[i + 1] += "  " + co2_text(leg_co2(leg, stations, trips))
 
     # ---- whole journey vs. car
-    train_kg, train_exact = journey_co2(legs, stations, trips)
-    car_kg, car_exact = car_co2(name_to_id[origin], name_to_id[destination], stations)
+    train_kg = journey_co2(legs, stations, trips)
+    car_kg = car_co2(name_to_id[origin], name_to_id[destination], stations)
     lines.append("")
-    lines.append(f"Total (train): {co2_text(train_kg, train_exact)}")
-    car_line = f"Car (petrol, 2.2 pers.): {co2_text(car_kg, car_exact)}"
+    lines.append(f"Total (train): {co2_text(train_kg)}")
+    car_line = f"Car (petrol, 2.2 pers.): {co2_text(car_kg)}"
     if train_kg > 0:  # 0 when the journey is only walking
         car_line += f"  (x{car_kg / train_kg:.0f})"
     lines.append(car_line)
     st.sidebar.code("\n".join(lines), language=None)
-    st.sidebar.caption("CO2e per traveller, SNCF factors per km. ≈ = estimated distance.")
+    st.sidebar.caption("Estimated CO2e per traveller (SNCF factors per km x distance).")
 
     return journey_layers(legs, stations, trips)
