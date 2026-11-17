@@ -1,6 +1,7 @@
 """Load the SNCF GTFS timetable for one day and turn it into a simple network
 
-Data: download + unzip into data/raw/gtfs_sncf/ (see data/raw/command.txt)
+Data: data/gtfs_sncf.zip, read directly from the zip (no need to unzip).
+    To update it (feed valid until 2027-04-30), download:
     https://www.data.gouv.fr/api/1/datasets/r/9ae758ec-cd7a-40cd-a890-bb3963224942
 
 Output:
@@ -12,12 +13,13 @@ Output:
 """
 
 import math
+import zipfile
 from pathlib import Path
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-GTFS_DIR = ROOT / "data" / "raw" / "gtfs_sncf"
+GTFS_ZIP = ROOT / "data" / "gtfs_sncf.zip"
 
 MAX_WALK_METERS = 1000  # walk between two stations if they are closer than this
 WALK_SPEED = 4.5 / 3.6  # m/s (4.5 km/h)
@@ -30,6 +32,12 @@ def to_seconds(time_text):
     return int(h) * 3600 + int(m) * 60 + int(s)
 
 
+def read_gtfs(name):
+    """Read one file of the GTFS (e.g. 'stops.txt') directly from the zip."""
+    with zipfile.ZipFile(GTFS_ZIP) as z:
+        return pd.read_csv(z.open(name), dtype=str)
+
+
 def distance_m(lat1, lon1, lat2, lon2):
     """Approximate distance in meters"""
     x = math.radians(lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
@@ -39,7 +47,7 @@ def distance_m(lat1, lon1, lat2, lon2):
 
 # stations, platforms -> stations
 def load_stations():
-    stops = pd.read_csv(GTFS_DIR / "stops.txt", dtype=str)
+    stops = read_gtfs("stops.txt")
 
     # location_type 1 = station (StopArea), the others are platforms (StopPoint)
     areas = stops[stops["location_type"] == "1"]
@@ -80,17 +88,17 @@ def load_network(date):
     stations, platform_to_station = load_stations()
 
     # 1: Which services run on that day "date"
-    calendar = pd.read_csv(GTFS_DIR / "calendar_dates.txt", dtype=str)
+    calendar = read_gtfs("calendar_dates.txt")
     running = calendar[(calendar["date"] == date) & (calendar["exception_type"] == "1")]
     services = set(running["service_id"])
 
     # 2: Which trips (= one train run) use those services
-    trips_df = pd.read_csv(GTFS_DIR / "trips.txt", dtype=str)
+    trips_df = read_gtfs("trips.txt")
     trips_df = trips_df[trips_df["service_id"].isin(services)]
     train_number = dict(zip(trips_df["trip_id"], trips_df["trip_headsign"]))
 
     # 3: Stop times of those trips, in order
-    st = pd.read_csv(GTFS_DIR / "stop_times.txt", dtype=str)
+    st = read_gtfs("stop_times.txt")
     st = st[st["trip_id"].isin(train_number)]
     st["stop_sequence"] = st["stop_sequence"].astype(int)
     st = st.sort_values(["trip_id", "stop_sequence"])
