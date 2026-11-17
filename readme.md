@@ -61,7 +61,7 @@ deactivate
 Pour calculer les distances entre les gares et les POI avec `BallTree` :
 
 ```bash
-python station_features.py
+python scripts/research/station_features.py
 ```
 
 Le fichier [`data/station_features.csv`](data/station_features.csv) contient les
@@ -82,6 +82,31 @@ nearby = find_nearby_pois(
 print(nearby[["distance_km", "Nom", "category"]])
 ```
 
+Pour éviter de reconstruire l'index spatial à chaque recherche :
+
+```bash
+python scripts/research/build_proximity_indexes.py
+```
+
+Cette commande crée `data/station_poi_index.csv`, qui contient les liens
+gare-POI jusqu'à 20 km, et `data/poi_nearest_station.csv`, qui contient la
+gare la plus proche de chaque POI. La recherche peut ensuite utiliser
+`find_nearby_pois_from_index`. Exemple :
+
+```python
+from station_features import find_nearby_pois_from_index, load_pois, load_stations
+import pandas as pd
+
+nearby = find_nearby_pois_from_index(
+    load_stations(),
+    load_pois(),
+    pd.read_csv("data/station_poi_index.csv"),
+    station_name="Paris Austerlitz",
+    radius_km=1,
+)
+print(nearby[["distance_km", "Nom", "category"]])
+```
+
 ## Structure principale
 
 ```text
@@ -89,6 +114,10 @@ print(nearby[["distance_km", "Nom", "category"]])
 ├── main.py                         # Point d'entrée
 ├── best_poi.py                      # Traitement des points d'intérêt
 ├── station_features.py              # Calcul des features gare-POI
+├── scripts/
+│   └── research/
+│       └── build_proximity_indexes.py       # Construction des index spatiaux
+│            station_features.py              # Calcul des features gare-POI
 ├── requirements.txt                # Dépendances Python
 ├── data/                            # Données préparées
 └── scripts/data_prep/DATA.md       # Téléchargement et préparation des données

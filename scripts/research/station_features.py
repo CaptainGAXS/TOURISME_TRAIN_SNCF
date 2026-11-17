@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.neighbors import BallTree
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 POI_FILES = {
     "hpoi": ROOT / "data" / "hpoi.csv",
     "npoi": ROOT / "data" / "npoi.csv",
@@ -54,7 +54,9 @@ def load_pois() -> pd.DataFrame:
         coordinate_key + "|" + name_key
     ).duplicated(keep="first")
     pois = pois.loc[~(duplicate_id | duplicate_name_coordinates)]
-    return pois.reset_index(drop=True)
+    pois = pois.reset_index(drop=True)
+    pois.insert(0, "poi_index", np.arange(len(pois)))
+    return pois
 
 
 def load_stations() -> pd.DataFrame:
@@ -81,7 +83,8 @@ def find_nearby_pois(
     if station_id is not None:
         matches = stations[stations["station_id"].eq(station_id)]
     else:
-        matches = stations[stations["name"].eq(station_name)]
+        if station_name is not None:
+            matches = stations[stations["name"].eq(station_name)]
     if matches.empty:
         raise ValueError("Station not found")
     if len(matches) > 1:
@@ -101,6 +104,84 @@ def find_nearby_pois(
     nearby = pois.iloc[indices[0]].copy()
     nearby.insert(0, "distance_km", distances[0] * EARTH_RADIUS_KM)
     return nearby.reset_index(drop=True)
+
+
+def build_proximity_indexes(
+    stations: pd.DataFrame,
+    pois: pd.DataFrame,
+    max_radius_km: float = 20,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build station-POI links and the nearest station for every POI."""
+    if max_radius_km <= 0:
+        raise ValueError("max_radius_km must be positive")
+
+    station_coordinates = np.radians(stations[["lat", "lon"]].to_numpy())
+    poi_coordinates = np.radians(pois[["lat", "lon"]].to_numpy())
+    station_tree = BallTree(station_coordinates, metric="haversine")
+    poi_tree = BallTree(poi_coordinates, metric="haversine")
+
+    poi_indices, distances = poi_tree.query_radius(
+        station_coordinates,
+        r=max_radius_km / EARTH_RADIUS_KM,
+        return_distance=True,
+        sort_results=True,
+    )
+    link_sizes = np.fromiter((len(indices) for indices in poi_indices), dtype=int)
+    station_poi_index = pd.DataFrame(
+        {
+            "station_id": np.repeat(stations["station_id"].to_numpy(), link_sizes),
+            "poi_index": np.concatenate(poi_indices),
+            "distance_km": np.concatenate(distances) * EARTH_RADIUS_KM,
+        }
+    )
+
+    nearest_distances, nearest_indices = station_tree.query(poi_coordinates, k=1)
+    poi_nearest_station = pd.DataFrame(
+        {
+            "poi_index": pois["poi_index"].to_numpy(),
+            "station_id": stations.iloc[nearest_indices[:, 0]]["station_id"].to_numpy(),
+            "distance_km": nearest_distances[:, 0] * EARTH_RADIUS_KM,
+        }
+    )
+    return station_poi_index, poi_nearest_station
+
+
+def find_nearby_pois_from_index(
+    stations: pd.DataFrame,
+    pois: pd.DataFrame,
+    station_poi_index: pd.DataFrame,
+    *,
+    station_id: str | None = None,
+    station_name: str | None = None,
+    radius_km: float = 5,
+) -> pd.DataFrame:
+    """Find nearby POIs by filtering a precomputed station-POI index."""
+    if (station_id is None) == (station_name is None):
+        raise ValueError("Provide exactly one of station_id or station_name")
+    if radius_km <= 0:
+        raise ValueError("radius_km must be positive")
+
+    if station_id is None:
+        if station_name is not None:
+            matches = stations[stations["name"].eq(station_name)]
+        if len(matches) > 1:
+            raise ValueError("station_name matches several stations; use station_id")
+        if matches.empty:
+            raise ValueError("Station not found")
+        station_id = matches.iloc[0]["station_id"]
+    elif stations[stations["station_id"].eq(station_id)].empty:
+        raise ValueError("Station not found")
+    if station_id is None:
+        raise ValueError("Station not found")
+    links = station_poi_index[
+        station_poi_index["station_id"].eq(station_id)
+        & station_poi_index["distance_km"].le(radius_km)
+    ]
+    return (
+        links.merge(pois, on="poi_index", how="left")
+        .sort_values("distance_km")
+        .reset_index(drop=True)
+    )
 
 
 def _query_features(
@@ -159,4 +240,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    nearby = find_nearby_pois(
+    load_stations(),
+    load_pois(),
+    station_name="Nancy",
+    radius_km=1,
+    )
+    print(nearby[["distance_km", "Nom", "category"]])
