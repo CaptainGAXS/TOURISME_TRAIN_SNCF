@@ -58,12 +58,37 @@ Pour quitter l'environnement virtuel :
 deactivate
 ```
 
+Pour calculer les distances entre les gares et les POI avec `BallTree` :
+
+```bash
+python station_features.py
+```
+
+Le fichier [`data/station_features.csv`](data/station_features.csv) contient les
+compteurs de POI à moins de 20, 15, 10, 5, 3 et 1 km, ainsi que la distance du
+POI le plus proche, pour chaque gare.
+
+Pour récupérer la liste des POI proches d'une gare :
+
+```python
+from station_features import find_nearby_pois, load_pois, load_stations
+
+nearby = find_nearby_pois(
+    load_stations(),
+    load_pois(),
+    station_name="Paris Austerlitz",
+    radius_km=3,
+)
+print(nearby[["distance_km", "Nom", "category"]])
+```
+
 ## Structure principale
 
 ```text
 .
 ├── main.py                         # Point d'entrée
 ├── best_poi.py                      # Traitement des points d'intérêt
+├── station_features.py              # Calcul des features gare-POI
 ├── requirements.txt                # Dépendances Python
 ├── data/                            # Données préparées
 └── scripts/data_prep/DATA.md       # Téléchargement et préparation des données
