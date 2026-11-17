@@ -10,8 +10,8 @@ def map_layer(mappath):
     layer = pdk.Layer(
         "GeoJsonLayer",
         data=geojson_data,
-        get_fill_color=[200, 30, 0, 160],
-        get_line_color=[255, 255, 255],
+        get_fill_color=[255,255,255],
+        get_line_color=[0,0,0],
         line_width_min_pixels=2,
     )
     return layer

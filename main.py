@@ -16,6 +16,22 @@ def map_selector():
     if st.sidebar.button("Gares"):
         scatter_layer = grab_station_data()
         layers.append(scatter_layer)
+    heatmap_choice = st.sidebar.radio(
+        "Quelle carte de chaleur souhaitez-vous afficher ?", 
+        ["Aucune", "POI naturels", "POI historiques", "POI évenementiels", "Parcs d'attraction"]
+    )
+    if heatmap_choice == "POI naturels":
+        heatmap_layer = grab_poi_data("npoi")
+        layers.append(heatmap_layer)
+    if heatmap_choice == "POI historiques":
+        heatmap_layer = grab_poi_data("hpoi")
+        layers.append(heatmap_layer)
+    if heatmap_choice == "POI évenementiels":
+        heatmap_layer = grab_poi_data("epoi")
+        layers.append(heatmap_layer)
+    if heatmap_choice == "Parcs d'attraction":
+        heatmap_layer = grab_poi_data("attractions_france")
+        layers.append(heatmap_layer)
 
     if st.session_state.selected_map:
         render_map(st.session_state.selected_map, layers)
@@ -34,6 +50,18 @@ def normalize_visitors(visitors):
 
     normalized_radius = ((sqrt_visitors - min_sqrt) / (max_sqrt - min_sqrt)) * (max_radius - min_radius) + min_radius
     return normalized_radius
+
+def grab_poi_data(poi_type):
+    df=pd.read_csv("data/"+poi_type+".csv", sep=",")
+
+    heatmap_layer = pdk.Layer(
+        "HeatmapLayer",
+        data=df,
+        get_position="[Longitude, Latitude]",
+        opacity=0.9,
+        radiusPixels=50,     # Adjust the spread of the heat
+    )
+    return heatmap_layer
 
 def grab_station_data():
     df= pd.read_csv("data/stations.csv", sep=",")
