@@ -17,7 +17,7 @@ EARTH_RADIUS_KM = 6371.0088
 
 
 def load_pois() -> pd.DataFrame:
-    """Load and deduplicate all prepared POI files."""
+    """Charge les fichiers de POI préparés et supprime les doublons."""
     frames = []
     for category, path in POI_FILES.items():
         poi = pd.read_csv(path)
@@ -60,10 +60,34 @@ def load_pois() -> pd.DataFrame:
 
 
 def load_stations() -> pd.DataFrame:
+    """Charge les gares en conservant les identifiants comme du texte."""
     return pd.read_csv(
         ROOT / "data" / "stations.csv",
         dtype={"station_id": "string", "uic": "string", "insee": "string"},
     )
+
+
+def _get_station(
+    stations: pd.DataFrame,
+    station_id: str | None,
+    station_name: str | None,
+) -> pd.Series:
+    """Retourne une gare et vérifie que la recherche est non ambiguë."""
+    if (station_id is None) == (station_name is None):
+        raise ValueError("Provide exactly one of station_id or station_name")
+
+    if station_id is not None:
+        matches = stations[stations["station_id"].eq(station_id)]
+    else:
+        if station_name is None:
+            raise ValueError("station_name cannot be None")
+        matches = stations[stations["name"].eq(station_name)]
+
+    if matches.empty:
+        raise ValueError("Station not found")
+    if len(matches) > 1:
+        raise ValueError("station_name matches several stations; use station_id")
+    return matches.iloc[0]
 
 
 def find_nearby_pois(
@@ -74,23 +98,11 @@ def find_nearby_pois(
     station_name: str | None = None,
     radius_km: float = 5,
 ) -> pd.DataFrame:
-    """Return POIs sorted by distance from one station."""
-    if (station_id is None) == (station_name is None):
-        raise ValueError("Provide exactly one of station_id or station_name")
+    """Retourne les POI triés par distance autour d'une gare."""
     if radius_km <= 0:
         raise ValueError("radius_km must be positive")
 
-    if station_id is not None:
-        matches = stations[stations["station_id"].eq(station_id)]
-    else:
-        if station_name is not None:
-            matches = stations[stations["name"].eq(station_name)]
-    if matches.empty:
-        raise ValueError("Station not found")
-    if len(matches) > 1:
-        raise ValueError("station_name matches several stations; use station_id")
-
-    station = matches.iloc[0]
+    station = _get_station(stations, station_id, station_name)
     station_coordinates = np.radians([[station["lat"], station["lon"]]])
     poi_coordinates = np.radians(pois[["lat", "lon"]].to_numpy())
     tree = BallTree(poi_coordinates, metric="haversine")
@@ -111,7 +123,7 @@ def build_proximity_indexes(
     pois: pd.DataFrame,
     max_radius_km: float = 20,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build station-POI links and the nearest station for every POI."""
+    """Construit les liens gare-POI et la gare la plus proche de chaque POI."""
     if max_radius_km <= 0:
         raise ValueError("max_radius_km must be positive")
 
@@ -155,28 +167,17 @@ def find_nearby_pois_from_index(
     station_name: str | None = None,
     radius_km: float = 5,
 ) -> pd.DataFrame:
-    """Find nearby POIs by filtering a precomputed station-POI index."""
-    if (station_id is None) == (station_name is None):
-        raise ValueError("Provide exactly one of station_id or station_name")
+    """Recherche les POI en filtrant un index spatial déjà calculé."""
     if radius_km <= 0:
         raise ValueError("radius_km must be positive")
 
-    if station_id is None:
-        if station_name is not None:
-            matches = stations[stations["name"].eq(station_name)]
-        if len(matches) > 1:
-            raise ValueError("station_name matches several stations; use station_id")
-        if matches.empty:
-            raise ValueError("Station not found")
-        station_id = matches.iloc[0]["station_id"]
-    elif stations[stations["station_id"].eq(station_id)].empty:
-        raise ValueError("Station not found")
-    if station_id is None:
-        raise ValueError("Station not found")
-    links = station_poi_index[
-        station_poi_index["station_id"].eq(station_id)
-        & station_poi_index["distance_km"].le(radius_km)
-    ]
+    station = _get_station(stations, station_id, station_name)
+    station_id = station["station_id"]
+    if station_id is not None:
+        links = station_poi_index[
+            station_poi_index["station_id"].eq(station_id)
+            & station_poi_index["distance_km"].le(radius_km)
+        ]
     return (
         links.merge(pois, on="poi_index", how="left")
         .sort_values("distance_km")
@@ -190,6 +191,7 @@ def _query_features(
     prefix: str,
     radiuses_km: tuple[int, ...],
 ) -> dict[str, np.ndarray]:
+    """Compte les POI dans chaque rayon et trouve le plus proche."""
     features = {}
     for radius_km in radiuses_km:
         counts = tree.query_radius(
@@ -209,10 +211,11 @@ def compute_station_features(
     pois: pd.DataFrame,
     radiuses_km: tuple[int, ...] = RADIUSES_KM,
 ) -> pd.DataFrame:
-    """Compute POI counts and nearest distances for every station."""
+    """Calcule les features de distance pour toutes les gares."""
     station_coordinates = np.radians(stations[["lat", "lon"]].to_numpy())
     features = stations.copy()
 
+    # Un arbre est construit pour l'ensemble des POI puis pour chaque catégorie.
     for category in ["all", *pois["category"].unique()]:
         category_pois = pois if category == "all" else pois[pois["category"] == category]
         if category_pois.empty:
@@ -240,10 +243,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    nearby = find_nearby_pois(
-    load_stations(),
-    load_pois(),
-    station_name="Nancy",
-    radius_km=1,
-    )
-    print(nearby[["distance_km", "Nom", "category"]])
+    main()
