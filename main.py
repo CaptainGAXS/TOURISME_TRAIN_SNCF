@@ -1,7 +1,8 @@
 import pandas as pd
+from show_map import map_selector
 
 def main():
-    pass
+    map_selector()
 
 
 if __name__ == "__main__":
