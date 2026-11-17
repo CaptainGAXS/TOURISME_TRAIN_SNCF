@@ -16,22 +16,27 @@ def map_layer(mappath):
     )
     return layer
 
-def render_map(mappath):
+def render_map(mappath, layers = []):
     maplayer = map_layer(mappath)
 
     view_state = pdk.ViewState(latitude=46.6, longitude=2.2, zoom=4.5)
 
+    custom_tooltip = {
+    "html": "<b>Gare:</b> {name} <br/> <b>Fréquentation:</b> {visitors}",
+    }
+
     deck = pdk.Deck(
-        layers=[maplayer],
+        layers=[maplayer] + layers,
         initial_view_state=view_state,
         map_provider=None,
-        map_style=None
+        map_style=None,
+        tooltip=custom_tooltip
     )
 
     deck_html = deck.to_html(as_string=True)
     components.html(deck_html, height=800)
 
-#Si on veut utiliser un sélecteur à la place
+#Si on veut utiliser un sélecteur à la place des boutons
 
 # map_choice = st.radio(
 #     "Choisissez une carte :",
@@ -44,16 +49,3 @@ def render_map(mappath):
 #     render_map("regions-50m.geojson")
 # else:
 #     st.write("Sélectionnez une option pour afficher la carte correspondante.")
-
-def map_selector():
-    if "selected_map" not in st.session_state:
-        st.session_state.selected_map = None
-    if st.sidebar.button("Carte par départements"):
-        st.session_state.selected_map = "data/departements-50m.geojson"
-    if st.sidebar.button("Carte par régions"):
-        st.session_state.selected_map = "data/regions-50m.geojson"
-
-    if st.session_state.selected_map:
-        render_map(st.session_state.selected_map)
-    else:
-        st.write("Sélectionnez une option dans la barre latérale pour afficher la carte correspondante.")
