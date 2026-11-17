@@ -1,11 +1,16 @@
-from pydeck.types import String
-import pandas as pd
-import streamlit as st
-import pydeck as pdk
-import numpy as np
+from pydeck.types import String # type: ignore
+import pandas as pd # type: ignore
+import streamlit as st # type: ignore
+import pydeck as pdk # type: ignore
+import numpy as np # type: ignore
+
 from show_map import render_map
 
 def map_selector():
+    st.sidebar.write("Choisissez un fond avant les données.")
+    st.sidebar.divider()
+    st.sidebar.write("Fonds de carte :")
+
     layers = []
     if "selected_map" not in st.session_state:
         st.session_state.selected_map = None
@@ -13,25 +18,33 @@ def map_selector():
         st.session_state.selected_map = "data/departements-50m.geojson"
     if st.sidebar.button("Carte par régions"):
         st.session_state.selected_map = "data/regions-50m.geojson"
-    if st.sidebar.button("Gares"):
+
+    st.sidebar.divider()
+    st.sidebar.write("Choisissez les données à afficher sur la carte :")
+
+    if st.sidebar.checkbox("Gares"):
         scatter_layer = grab_station_data()
         layers.append(scatter_layer)
+
     heatmap_choice = st.sidebar.radio(
-        "Quelle carte de chaleur souhaitez-vous afficher ?", 
-        ["Aucune", "POI naturels", "POI historiques", "POI évenementiels", "Parcs d'attraction"]
+        "Cartes de chaleur:", 
+        ["Aucune", "POI naturels", "POI historiques", "POI évenementiels", "Parcs d'attraction", "Gares et proximité de POI"]
     )
     if heatmap_choice == "POI naturels":
         heatmap_layer = grab_poi_data("npoi")
-        layers.append(heatmap_layer)
+        layers = [heatmap_layer] + layers
     if heatmap_choice == "POI historiques":
         heatmap_layer = grab_poi_data("hpoi")
-        layers.append(heatmap_layer)
+        layers = [heatmap_layer] + layers
     if heatmap_choice == "POI évenementiels":
         heatmap_layer = grab_poi_data("epoi")
-        layers.append(heatmap_layer)
+        layers = [heatmap_layer] + layers
     if heatmap_choice == "Parcs d'attraction":
         heatmap_layer = grab_poi_data("attractions_france")
-        layers.append(heatmap_layer)
+        layers = [heatmap_layer] + layers
+    if heatmap_choice == "Gares et proximité de POI":
+        heatmap_layer = grab_station_proximity_data()
+        layers = [heatmap_layer] + layers
 
     if st.session_state.selected_map:
         render_map(st.session_state.selected_map, layers)
@@ -62,6 +75,33 @@ def grab_poi_data(poi_type):
         radiusPixels=50,     # Adjust the spread of the heat
     )
     return heatmap_layer
+
+def weight_poi_prox(poi_count_20km,poi_count_15km,poi_count_10km,poi_count_5km):
+    weights = {
+        '20km': 0.2,
+        '15km': 0.3,
+        '10km': 0.4,
+        '5km': 0.5
+    }
+    weighted_sum = (weights['20km'] * poi_count_20km +
+                    weights['15km'] * poi_count_15km +
+                    weights['10km'] * poi_count_10km +
+                    weights['5km'] * poi_count_5km)
+    return weighted_sum
+
+def grab_station_proximity_data():
+    df = pd.read_csv("data/station_features.csv", sep=",")
+    df["weight_proximity"] = weight_poi_prox(df["poi_count_20km"], df["poi_count_15km"], df["poi_count_10km"], df["poi_count_5km"])
+
+    heatmap_layer = pdk.Layer(
+        "HeatmapLayer",
+        data=df,
+        get_position="[lon, lat]",
+        get_weight="weight_proximity",
+        opacity=0.9,
+        radiusPixels=100,     # Adjust the spread of the heat
+    )
+    return heatmap_layer    
 
 def grab_station_data():
     df= pd.read_csv("data/stations.csv", sep=",")
