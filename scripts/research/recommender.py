@@ -8,6 +8,7 @@ from sklearn.neighbors import BallTree
 from sklearn.preprocessing import StandardScaler
 
 
+# Racine du projet et correspondance entre préférences et fichiers de POI.
 ROOT = Path(__file__).resolve().parent.parent.parent
 CATEGORY_COLUMNS = {
     "culture": "hpoi",
@@ -16,6 +17,7 @@ CATEGORY_COLUMNS = {
     "attractions": "attraction",
 }
 RADIUSES_KM = (20, 15, 10, 5, 3, 1)
+# Départements composant la région Île-de-France.
 ILE_DE_FRANCE_DEPARTMENTS = frozenset(
     {"75", "77", "78", "91", "92", "93", "94", "95"}
 )
@@ -23,6 +25,8 @@ ILE_DE_FRANCE_DEPARTMENTS = frozenset(
 
 @dataclass(frozen=True)
 class RecommendationCriteria:
+    """Paramètres utilisés pour filtrer et classer les destinations."""
+
     culture: float = 0.25
     nature: float = 0.25
     events: float = 0.25
@@ -37,6 +41,7 @@ class RecommendationCriteria:
     exclude_ile_de_france: bool = False
 
     def preferences(self) -> dict[str, float]:
+        """Valide et normalise les préférences touristiques."""
         values = {
             "culture": self.culture,
             "nature": self.nature,
@@ -64,12 +69,13 @@ class RecommendationCriteria:
                 raise ValueError(
                     "A departure station is required with max_distance_km"
                 )
+        # La somme vaut 1 pour rendre les scores comparables.
         total = sum(values.values())
         return {name: value / total for name, value in values.items()}
 
 
 class TourismRecommender:
-    """Cluster stations, then rank them according to user preferences."""
+    """Regroupe les gares puis les classe selon les préférences utilisateur."""
 
     def __init__(self, n_clusters: int = 6, random_state: int = 42):
         if n_clusters < 2:
@@ -77,12 +83,12 @@ class TourismRecommender:
         self.n_clusters = n_clusters
         self.random_state = random_state
         self._stations = None
-        self._category_columns = None
-        self._scaler = None
         self._model = None
         self._cluster_profiles: pd.DataFrame | None = None
 
     def fit(self, stations: pd.DataFrame) -> "TourismRecommender":
+        """Entraîne K-Means sur les features touristiques des gares."""
+        # Les compteurs à 10 km décrivent le profil touristique de chaque gare.
         category_columns = {
             category: f"{prefix}_count_10km"
             for category, prefix in CATEGORY_COLUMNS.items()
@@ -95,20 +101,20 @@ class TourismRecommender:
 
         model_data = stations.copy()
         tourism_columns = list(category_columns.values())
-        tourism_values: pd.DataFrame = pd.DataFrame(
+        tourism_values = pd.DataFrame(
             np.log1p(model_data[tourism_columns].fillna(0)),
             index=model_data.index,
             columns=tourism_columns,
         )
-        popularity: pd.Series = pd.Series(
+        popularity = pd.Series(
             np.log1p(model_data["visitors"].fillna(0).clip(lower=0)),
             index=model_data.index,
             name="popularity",
         )
-        matrix = pd.concat([tourism_values, popularity.rename("popularity")], axis=1)
+        matrix = pd.concat([tourism_values, popularity], axis=1)
 
-        self._scaler = StandardScaler()
-        scaled_matrix = self._scaler.fit_transform(matrix)
+        # La standardisation évite que la fréquentation domine les autres données.
+        scaled_matrix = StandardScaler().fit_transform(matrix)
         self._model = KMeans(
             n_clusters=min(self.n_clusters, len(model_data)),
             n_init=10,
@@ -117,8 +123,9 @@ class TourismRecommender:
 
         self._stations = model_data.copy()
         self._stations["cluster"] = self._model.labels_
-        self._category_columns = category_columns
 
+        # Le profil moyen de chaque cluster sert à sélectionner les clusters
+        # correspondant le mieux aux préférences de l'utilisateur.
         normalized = tourism_values.div(
             tourism_values.max().replace(0, 1), axis="columns"
         )
@@ -131,17 +138,20 @@ class TourismRecommender:
     def recommend(
         self, criteria: RecommendationCriteria | None = None
     ) -> pd.DataFrame:
+        """Retourne les meilleures gares selon les critères fournis."""
         if self._stations is None:
             raise RuntimeError("Call fit() before recommend()")
         criteria = criteria or RecommendationCriteria()
         preferences = criteria.preferences()
 
+        # Première sélection : fréquentation minimale de la gare.
         candidates = self._stations[
             self._stations["visitors"].fillna(0).ge(criteria.min_visitors)
         ].copy()
         if candidates.empty:
             raise ValueError("No station matches min_visitors")
 
+        # La distance de départ est calculée uniquement si une gare est fournie.
         candidates["distance_from_departure_km"] = np.nan
         if criteria.departure_station_id or criteria.departure_station_name:
             if criteria.departure_station_id:
@@ -163,6 +173,7 @@ class TourismRecommender:
                 )
 
             departure = departure_matches.iloc[0]
+            # BallTree utilise la distance haversine sur des coordonnées en radians.
             station_coordinates = np.radians(
                 self._stations[["lat", "lon"]].to_numpy()
             )
@@ -210,6 +221,7 @@ class TourismRecommender:
         if candidates.empty:
             raise ValueError("No destination station matches the search scope")
 
+        # K-Means réduit l'espace de recherche aux clusters les plus adaptés.
         preference_vector = pd.Series(preferences)
         cluster_profiles = self._cluster_profiles
         if cluster_profiles is None:
@@ -221,6 +233,7 @@ class TourismRecommender:
         if candidates.empty:
             raise ValueError("No station matches the requested preferences")
 
+        # Score touristique normalisé pour chaque catégorie choisie.
         category_scores = pd.DataFrame(index=candidates.index)
         for category, prefix in CATEGORY_COLUMNS.items():
             column = f"{prefix}_count_{criteria.radius_km}km"
@@ -229,6 +242,7 @@ class TourismRecommender:
             category_scores[category] = values / (maximum or 1)
 
         tourism_score = category_scores.dot(preference_vector)
+        # La fréquentation peut compléter les préférences sans les remplacer.
         popularity_values = np.log1p(candidates["visitors"].fillna(0).clip(lower=0))
         popularity_score = popularity_values / (
             np.log1p(self._stations["visitors"].fillna(0).clip(lower=0)).max() or 1
@@ -238,6 +252,7 @@ class TourismRecommender:
             + criteria.prefer_popular * popularity_score
         )
         candidates["cluster_score"] = candidates["cluster"].map(cluster_scores)
+        # Cette colonne explique la raison principale de la recommandation.
         candidates["dominant_category"] = category_scores.mul(
             preference_vector
         ).idxmax(axis=1)
@@ -252,19 +267,21 @@ class TourismRecommender:
 
 
 def main() -> None:
+    """Exemple d'utilisation du moteur de recommandation."""
     stations = pd.read_csv(ROOT / "data" / "station_features.csv")
     recommender = TourismRecommender().fit(stations)
     recommendations = recommender.recommend(
         RecommendationCriteria(
             culture=0.1,
-            nature=0.1,
+            nature=0.8,
             events=0.2,
-            attractions=0.9,
+            attractions=0.2,
             radius_km=10,
             departure_station_name="Nancy",
             max_distance_km=300,
             n_results=5,
-    )
+            exclude_ile_de_france=True,
+        )
     )
     print(recommendations[["name", "recommendation_score", "dominant_category"]])
 
