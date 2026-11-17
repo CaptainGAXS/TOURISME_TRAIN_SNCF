@@ -14,7 +14,7 @@ To have the tourism data ready, run the following command:
 ```
 curl -L -o data/raw/datatourisme.csv "https://explore.datatourisme.fr/api/export?query=%7B%22match_all%22%3A%7B%7D%7D&format=csv"
 curl -L -o data/raw/parcs-du-monde.csv "https://www.data.gouv.fr/api/1/datasets/r/4f04d401-399a-4959-ac4f-d0f626061a7c"
-python scripts/data_prep/pre-traitement-tourism.py
+PYTHONPATH=. python scripts/data_prep/pre-traitement-tourism.py
 ```
 
 ## Shape
