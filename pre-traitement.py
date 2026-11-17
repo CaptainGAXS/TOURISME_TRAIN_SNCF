@@ -67,7 +67,6 @@ HIGH_VALUE_POI = [
     "Site archéologique",
     "Site culturel",
     "Site religieux",
-    "Lieu de mémoire",
     "Patrimoine industriel",
     "Galerie d'art",
     "Opéra",
