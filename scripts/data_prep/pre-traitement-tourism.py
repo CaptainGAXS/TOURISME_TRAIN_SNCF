@@ -1,4 +1,5 @@
 import pandas as pd
+from poi import HIGH_VALUE_POI, NATURE_POI, EVENTS
 
 NAME_FILE_ATTRACTIONS = "data/raw/parcs-du-monde.csv"
 NAME_FILE_TOURISME = "data/raw/datatourisme.csv"
@@ -61,66 +62,6 @@ def obtenir_types_uniques(sep: str = ",", separateur_valeurs: str = ",") -> list
     
     return sorted(st for st in sous_types_uniques if st)
    
-HIGH_VALUE_POI = [
-    "Musée",
-    "Château et demeure de prestige",
-    "Site archéologique",
-    "Site culturel",
-    "Site religieux",
-    "Patrimoine industriel",
-    "Galerie d'art",
-    "Opéra",
-    "Théatre",
-    "Vivarium - Aquarium",
-    "Zoo - parc animalier",
-    "Parc naturel",
-    "Grotte",
-    "Cascade",
-    "Canyon",
-    "Cirque naturel",
-    "Volcan",
-    "Téléphérique touristique",
-    "Train touristique",
-    "Office de tourisme",
-    "Maison du tourisme"
-]
-
-NATURE_POI = [
-    "Lac",
-    "Forêt",
-    "Montagne",
-    "Vallée",
-    "Plage",
-    "Dune",
-    "Marais",
-    "Zone humide",
-    "Curiosité naturelle",
-    "Point de vue",
-    "Source",
-    "Rivière ou fleuve",
-    "Parc et jardin",
-    "Itinéraire pédestre",
-    "Itinéraire cyclable",
-    "Randonnée",
-    "Via ferrata",
-    "Vélorail"
-]
-
-EVENTS = [
-    "Festival",
-    "Concert",
-    "Exposition",
-    "Spectacle",
-    "Son et lumière",
-    "Carnaval",
-    "Fête traditionnelle",
-    "Évènement culturel",
-    "Pièce de théâtre"
-]
-
-
-import pandas as pd
-
 def filtrer_par_sous_types(
     sous_types_recherches: list[str],
     nom_sortie: str,
