@@ -4,7 +4,7 @@ import pandas as pd
 # Project root = two levels above scripts/data_prep/ (works from any working directory)
 ROOT = Path(__file__).resolve().parents[2]
 RAW = ROOT / "data" / "raw"
-OUT = ROOT / "data" / "processed"
+OUT = ROOT / "data"
 
 
 def load_stations(path):
