@@ -161,6 +161,7 @@ def build_proximity_indexes(
             "station_id": np.repeat(stations["station_id"].to_numpy(), link_sizes),
             "poi_index": np.concatenate(poi_indices),
             "distance_km": np.concatenate(distances) * EARTH_RADIUS_KM,
+            "nom_poi": pois["Nom"].to_numpy()[np.concatenate(poi_indices)],
         }
     )
 
@@ -169,6 +170,7 @@ def build_proximity_indexes(
     poi_nearest_station = pd.DataFrame(
         {
             "poi_index": pois["poi_index"].to_numpy(),
+            "nom_poi": pois["Nom"].to_numpy()[nearest_indices[:, 0]],
             "station_id": stations.iloc[nearest_indices[:, 0]]["station_id"].to_numpy(),
             "distance_km": nearest_distances[:, 0] * EARTH_RADIUS_KM,
         }
