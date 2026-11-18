@@ -84,7 +84,7 @@ def station_selector(display_area):
     if st.session_state.selected_department:
         dep_number = df_dep[df_dep["nom_departement"] == st.session_state.selected_department]["code_departement"].values[0]
         filtered_stations = df_stations[df_stations["departement"] == dep_number]
-        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"], index = None, placeholer= "Gares du département choisi")
+        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"])
     else:
         st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", df_stations["name"], index = None, placeholder = "Gares")
     if st.session_state.selected_station:
