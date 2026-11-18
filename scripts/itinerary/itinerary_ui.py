@@ -5,6 +5,10 @@ deck = pdk.Deck(layers=[other_layer] + layers, ...)
 
 network, start_seconds = date_time_inputs()
 layers = journey_panel(network, origin_id, destination_id, start_seconds)
+
+Every function takes an optional `container` where its inputs and results are drawn
+(default: the sidebar), e.g. a collapsible box:
+layers = itinerary_sidebar(st.sidebar.expander("Itinéraire", expanded=True))
 """
 
 from datetime import date, time, timedelta
@@ -31,17 +35,17 @@ def get_network(day):
     return load_network(day)
 
 
-def date_time_inputs():
+def date_time_inputs(container=st.sidebar):
     """Date + earliest departure time. Returns (network of that day, start time in seconds)."""
-    day = st.sidebar.date_input(
+    day = container.date_input(
         "Date", date.today() + timedelta(days=1), key="itin_date"
     )
-    start = st.sidebar.time_input("Departure after", time(7, 0), key="itin_time")
+    start = container.time_input("Departure after", time(7, 0), key="itin_time")
     network = get_network(day.strftime("%Y%m%d"))
     return network, start.hour * 3600 + start.minute * 60
 
 
-def journey_panel(network, origin, destination, start_seconds):
+def journey_panel(network, origin, destination, start_seconds, container=st.sidebar):
     """Journeys between two GTFS station_ids: choose one, show details + CO2.
     Returns the pydeck layers of the chosen journey ([] if none)."""
     stations, connections, trips, footpaths = network
@@ -49,7 +53,7 @@ def journey_panel(network, origin, destination, start_seconds):
     # ---- search
     journeys = plan(network, origin, destination, start_seconds, n=5)
     if not journeys:
-        st.sidebar.warning("No journey found.")
+        container.warning("No journey found.")
         return []
 
     # ---- choose one journey
@@ -58,7 +62,7 @@ def journey_panel(network, origin, destination, start_seconds):
         f"{co2_text(journey_co2(legs, stations, trips))}"
         for legs in journeys
     ]
-    choice = st.sidebar.radio(
+    choice = container.radio(
         "Journeys",
         range(len(journeys)),
         format_func=lambda i: summaries[i],
@@ -81,25 +85,26 @@ def journey_panel(network, origin, destination, start_seconds):
     if train_kg > 0:  # 0 when the journey is only walking
         car_line += f"  (x{car_kg / train_kg:.0f})"
     lines.append(car_line)
-    st.sidebar.code("\n".join(lines), language=None)
-    st.sidebar.caption("Estimated CO2e per traveller (SNCF factors per km x distance).")
+    container.code("\n".join(lines), language=None)
+    container.caption("Estimated CO2e per traveller (SNCF factors per km x distance).")
 
     return journey_layers(legs, stations, trips)
 
 
-def itinerary_sidebar():
-    st.sidebar.header("Itinéraire")
-    network, start_seconds = date_time_inputs()
+def itinerary_sidebar(container=st.sidebar):
+    """Stand-alone version: its own date, time, From and To inputs, drawn in `container`."""
+    container.header("Itinéraire")
+    network, start_seconds = date_time_inputs(container)
     stations = network[0]
 
     name_to_id = {s["name"]: sid for sid, s in stations.items()}
     names = sorted(name_to_id)
-    origin = st.sidebar.selectbox(
+    origin = container.selectbox(
         "From", names, index=names.index("Nancy"), key="itin_from"
     )
-    destination = st.sidebar.selectbox(
+    destination = container.selectbox(
         "To", names, index=names.index("Paris Est"), key="itin_to"
     )
     return journey_panel(
-        network, name_to_id[origin], name_to_id[destination], start_seconds
+        network, name_to_id[origin], name_to_id[destination], start_seconds, container
     )
