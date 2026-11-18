@@ -41,8 +41,8 @@ En particulier, ce document explique comment :
   `hpoi.csv`, `npoi.csv` et `epoi.csv`) avec
   `pre-traitement-tourism.py`.
 
-Les colonnes d'identifiants doivent être lues comme du texte afin de conserver
-les zéros initiaux des codes INSEE et UIC.
+Les identifiants utilisés pendant la préparation sont lus comme du texte afin
+de conserver leurs zéros initiaux.
 
 ## Lancer le programme
 
