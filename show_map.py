@@ -1,6 +1,7 @@
 import json # type: ignore
 import pydeck as pdk # type: ignore
 import streamlit as st # type: ignore
+import streamlit.components.v1 as components # type: ignore
 
 @st.cache_data
 def load_geojson(mappath):
@@ -36,5 +37,6 @@ def render_map(display_area, mappath, layers = []):
         tooltip=custom_tooltip
     )
 
+    deck_html = deck.to_html(as_string=True)
     with display_area:
-        st.pydeck_chart(deck, width="stretch", height=800)
+        components.html(deck_html, height=800)
