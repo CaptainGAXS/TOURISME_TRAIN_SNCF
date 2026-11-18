@@ -107,6 +107,47 @@ nearby = find_nearby_pois_from_index(
 print(nearby[["distance_km", "Nom", "category"]])
 ```
 
+## Recommandations personnalisées
+
+Le moteur utilise K-Means pour regrouper les gares selon leurs profils
+touristiques, puis les classe selon les préférences de l'utilisateur :
+
+```python
+import pandas as pd
+
+from scripts.research.recommender import (
+    RecommendationCriteria,
+    TourismRecommender,
+)
+
+stations = pd.read_csv("data/station_features.csv")
+recommender = TourismRecommender().fit(stations)
+recommendations = recommender.recommend(
+    RecommendationCriteria(
+        culture=0.8,
+        nature=0.2,
+        events=0,
+        attractions=0,
+        radius_km=10,
+        departure_station_name="Nancy",
+        max_distance_km=10,
+        exclude_ile_de_france=True,
+        n_results=5,
+    )
+)
+print(recommendations[
+    ["name", "distance_from_departure_km",
+     "recommendation_score", "dominant_category"]
+])
+```
+
+Les préférences sont normalisées automatiquement. Les valeurs doivent être
+comprises entre 0 et 1 ; `prefer_popular` contrôle l'importance de la
+fréquentation de la gare. `max_distance_km` limite la recherche autour de la
+gare de départ. Pour rechercher dans toute la France, renseigner la gare de
+départ sans fournir `max_distance_km`. `exclude_ile_de_france=True` retire les
+destinations des départements 75, 77, 78, 91, 92, 93, 94 et 95.
+
 ## Structure principale
 
 ```text
@@ -116,8 +157,9 @@ print(nearby[["distance_km", "Nom", "category"]])
 ├── station_features.py              # Calcul des features gare-POI
 ├── scripts/
 │   └── research/
-│       └── build_proximity_indexes.py       # Construction des index spatiaux
-│            station_features.py              # Calcul des features gare-POI
+│       ├── build_proximity_indexes.py       # Construction des index spatiaux
+│       ├── recommender.py                   # Recommandations et clustering
+│       └── station_features.py              # Calcul des features gare-POI
 ├── requirements.txt                # Dépendances Python
 ├── data/                            # Données préparées
 └── scripts/data_prep/DATA.md       # Téléchargement et préparation des données
