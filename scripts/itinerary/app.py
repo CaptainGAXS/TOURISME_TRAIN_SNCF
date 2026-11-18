@@ -66,5 +66,6 @@ st.pydeck_chart(
         initial_view_state=pdk.ViewState(latitude=46.6, longitude=2.2, zoom=5),
         tooltip={"text": "{name}"},
     ),
+    width="stretch",
     height=700,
 )

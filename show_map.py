@@ -36,6 +36,5 @@ def render_map(display_area, mappath, layers = []):
         tooltip=custom_tooltip
     )
 
-    deck_html = deck.to_html(as_string=True)
     with display_area:
-        st.iframe(deck_html, height=800)
+        st.pydeck_chart(deck, width="stretch", height=800)

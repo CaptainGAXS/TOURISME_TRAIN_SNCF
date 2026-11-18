@@ -441,15 +441,15 @@ def main() -> None:
 
     # Critères utilisateur simplifiés
     criteria = RecommendationCriteria(
-        culture=0.1,
-        nature=0.8,
-        events=0.2,
-        attractions=0.2,
+        culture=1.0,
+        nature=0.0,
+        events=0.0,
+        attractions=0.0,
         radius_km=10,
-        departure_station="Nancy",
-        max_travel_minutes=60,
-        travel_date="20261221",
-        departure_time="07:00",
+        departure_station="Paris Est",
+        max_travel_minutes=180,
+        travel_date="20261118",
+        departure_time="15:53",
         exclude_paris=True,
     )
 
