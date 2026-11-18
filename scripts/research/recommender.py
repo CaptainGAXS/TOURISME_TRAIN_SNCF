@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -39,6 +40,9 @@ class RecommendationCriteria:
     radius_km: int = 10
     departure_station: str | None = None  # Accepte un nom de gare ou un station_id
     max_distance_km: float | None = None
+    max_travel_minutes: float | None = None
+    travel_date: str | None = None
+    departure_time: str = "07:00"
     exclude_paris: bool = False
 
     def __post_init__(self) -> None:
@@ -55,6 +59,21 @@ class RecommendationCriteria:
                 raise ValueError("max_distance_km doit être strictement positif.")
             if not self.departure_station:
                 raise ValueError("Une gare de départ est requise avec max_distance_km.")
+        if self.max_travel_minutes is not None:
+            if self.max_travel_minutes <= 0:
+                raise ValueError("max_travel_minutes doit être strictement positif.")
+            if not self.departure_station:
+                raise ValueError("Une gare de départ est requise avec max_travel_minutes.")
+            if not self.travel_date:
+                raise ValueError("travel_date est requis avec max_travel_minutes.")
+            if len(self.travel_date) != 8 or not self.travel_date.isdigit():
+                raise ValueError("travel_date doit avoir le format YYYYMMDD.")
+            try:
+                hours, minutes = (int(part) for part in self.departure_time.split(":"))
+            except (AttributeError, TypeError, ValueError):
+                raise ValueError("departure_time doit avoir le format HH:MM.")
+            if not (0 <= hours <= 23 and 0 <= minutes <= 59):
+                raise ValueError("departure_time doit avoir le format HH:MM.")
 
     def normalized_preferences(self) -> dict[str, float]:
         """Normalise les poids des 4 préférences pour que leur somme vaille 1."""
@@ -183,6 +202,80 @@ class TourismRecommender:
             raise ValueError(f"Plusieurs gares correspondent à '{query}' ; préciser le station_id.")
         return by_name.iloc[0]
 
+    @staticmethod
+    def _normalize_station_name(name: object) -> str:
+        """Normalise les noms pour relier les données des gares au réseau GTFS."""
+        normalized = unicodedata.normalize("NFKD", str(name))
+        return (
+            normalized.encode("ascii", "ignore")
+            .decode()
+            .lower()
+            .replace("-", " ")
+            .strip()
+        )
+
+    def _filter_by_travel_time(
+        self,
+        candidates: pd.DataFrame,
+        departure: pd.Series,
+        criteria: RecommendationCriteria,
+    ) -> pd.DataFrame:
+        """Filtre les gares accessibles en moins de x minutes dans le réseau SNCF."""
+        if criteria.max_travel_minutes is None:
+            return candidates
+
+        from scripts.itinerary.network import load_network
+        from scripts.itinerary.planner import earliest_arrival
+
+        network = load_network(criteria.travel_date)
+        gtfs_stations, connections, _trips, footpaths = network
+        gtfs_id_by_name = {
+            self._normalize_station_name(station["name"]): station_id
+            for station_id, station in gtfs_stations.items()
+        }
+
+        departure_name = self._normalize_station_name(departure["name"])
+        origin_id = gtfs_id_by_name.get(departure_name)
+        if origin_id is None:
+            raise ValueError(
+                f"La gare de départ '{departure['name']}' est absente du réseau d'itinéraire."
+            )
+
+        hours, minutes = (int(part) for part in criteria.departure_time.split(":"))
+        start_seconds = hours * 3600 + minutes * 60
+        travel_times = []
+
+        for _, candidate in candidates.iterrows():
+            destination_name = self._normalize_station_name(candidate["name"])
+            destination_id = gtfs_id_by_name.get(destination_name)
+            if destination_id is None:
+                travel_times.append(np.nan)
+                continue
+
+            legs = earliest_arrival(
+                connections,
+                footpaths,
+                origin_id,
+                destination_id,
+                start_seconds,
+            )
+            travel_times.append(
+                np.nan
+                if legs is None
+                else (legs[-1]["arr"] - start_seconds) / 60
+            )
+
+        filtered = candidates.copy()
+        filtered["travel_time_minutes"] = travel_times
+        filtered = filtered[
+            filtered["travel_time_minutes"].le(criteria.max_travel_minutes)
+        ]
+        if filtered.empty:
+            raise ValueError(
+                "Aucune gare n'est accessible dans la durée maximale demandée."
+            )
+        return filtered
+
     def recommend(
         self,
         criteria: RecommendationCriteria | None = None,
@@ -224,6 +317,12 @@ class TourismRecommender:
                 candidates = candidates[
                     candidates["distance_from_departure_km"].le(criteria.max_distance_km)
                 ]
+            if criteria.max_travel_minutes is not None:
+                candidates = self._filter_by_travel_time(
+                    candidates,
+                    departure,
+                    criteria,
+                )
 
         # 3. Exclusion optionnelle de Paris / Île-de-France
         if criteria.exclude_paris:
@@ -346,9 +445,11 @@ def main() -> None:
         nature=0.8,
         events=0.2,
         attractions=0.2,
-        radius_km=2,
+        radius_km=10,
         departure_station="Nancy",
-        max_distance_km=300,
+        max_travel_minutes=60,
+        travel_date="20261221",
+        departure_time="07:00",
         exclude_paris=True,
     )
 
