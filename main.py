@@ -1,13 +1,14 @@
-from pydeck.types import String  # type: ignore
-import pandas as pd  # type: ignore
-import streamlit as st  # type: ignore
-import pydeck as pdk  # type: ignore
-import numpy as np  # type: ignore
+from pydeck.types import String # type: ignore
+import pandas as pd # type: ignore
+import streamlit as st # type: ignore
+import pydeck as pdk # type: ignore
+import numpy as np # type: ignore
 
 from show_map import render_map
-from scripts.itinerary.itinerary_ui import itinerary_sidebar
+from scripts.itinerary.itinerary_ui import itinerary_sidebar,date_time_inputs, journey_panel
 from scripts.research.recommender import RecommendationCriteria, TourismRecommender, get_top_pois_for_recommendations
 from scripts.research.station_features import load_pois
+from datetime import date, time, timedelta
 
 def destination_recommender_ui():
     st.sidebar.header("Recommandation de destination")
@@ -45,72 +46,77 @@ def destination_recommender_ui():
         )
 
         with st.spinner("Recherche des meilleures destinations et activités..."):
-            try:
-                # 3. Run the Recommender for stations
-                recommender = TourismRecommender().fit(stations_df)
-                results = recommender.recommend(criteria, n_results=5)
-                
-                # 4. Load POI data and spatial indexes
-                pois = load_pois()
-                station_poi_index = pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
-                
-                # 5. Fetch the Top 10 POIs for these recommendations
-                top_pois = get_top_pois_for_recommendations(
-                    results,
-                    criteria,
-                    pois,
-                    station_poi_index,
-                    n_pois=10, 
-                    favor_poi_with_website=recommender.favor_poi_with_website
-                )
-                
-                # 6. Display Results on the MAIN SCREEN
-                st.success("Destinations recommandées trouvées !")
-                
-                for _, station in results.iterrows():
-                    # Display the station name and straight-line distance cleanly
-                    st.subheader(f"{station['name']} — {station['distance_from_departure_km']:.0f} km")
-                    
-                    # Filter the top_pois dataframe for just this station
-                    station_pois = top_pois[top_pois["station_name"] == station["name"]]
-                    
-                    if not station_pois.empty:
-                        # Select relevant columns including the website
-                        display_pois = station_pois[["Nom", "category", "distance_km", "Site internet"]].copy()
-                        
-                        # Format the distance
-                        display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
-                        
-                        # Clean up missing websites for a better display
-                        display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
-                        
-                        # Rename columns for the user interface
-                        display_pois.rename(columns={
-                            "category": "Catégorie", 
-                            "distance_km": "Distance",
-                            "Site internet": "Site Web"
-                        }, inplace=True)
-                        
-                        # Display as a clean table on the main screen
-                        st.dataframe(
-                            display_pois, 
-                            hide_index=True, 
-                            use_container_width=True,
-                            column_config={
-                                "Site Web": st.column_config.LinkColumn("Site Web")
-                            }
-                        )
-                    else:
-                        st.write("Aucune activité trouvée selon ces critères.")
-                        
-                    st.divider() # Add a visual separator between destinations
-                
-                return results
+            # 3. Run the Recommender for stations
+            recommender = TourismRecommender().fit(stations_df)
+            results = recommender.recommend(criteria, n_results=5)
+            
+            # 4. Load POI data and spatial indexes
+            pois = load_pois()
+            station_poi_index = pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
+            
+            # 5. Fetch the Top 10 POIs for these recommendations
+            top_pois = get_top_pois_for_recommendations(
+                results,
+                criteria,
+                pois,
+                station_poi_index,
+                n_pois=10, 
+                favor_poi_with_website=recommender.favor_poi_with_website
+            )
 
-            except ValueError as e:
-                st.sidebar.error(f"Erreur: {str(e)}")
-                return None
+            # SAVE TO SESSION STATE
+            st.session_state.reco_results = results
+            st.session_state.reco_pois = top_pois
+            st.session_state.departure_name = departure
+            st.session_state.selected_itinerary = None # Reset selected itinerary
+                
+    if "reco_results" in st.session_state:
+            st.success("Destinations recommandées trouvées !")
+            results = st.session_state.reco_results
+            top_pois = st.session_state.reco_pois
+        
+            for _, station in results.iterrows():
+                # Display the station name and straight-line distance cleanly
+                st.subheader(f"{station['name']} — {station['distance_from_departure_km']:.0f} km")
 
+                if st.button(f"Voir les trains pour {station['name']}", key=f"itin_{station['station_id']}"):
+                    st.session_state.selected_itinerary = station['name']
+                    st.rerun()
+                
+                # Filter the top_pois dataframe for just this station
+                station_pois = top_pois[top_pois["station_name"] == station["name"]]
+                
+                if not station_pois.empty:
+                    # Select relevant columns including the website
+                    display_pois = station_pois[["Nom", "category", "distance_km", "Site internet"]].copy()
+                    
+                    # Format the distance
+                    display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
+                    
+                    # Clean up missing websites for a better display
+                    display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
+                    
+                    # Rename columns for the user interface
+                    display_pois.rename(columns={
+                        "category": "Catégorie", 
+                        "distance_km": "Distance",
+                        "Site internet": "Site Web"
+                    }, inplace=True)
+                    
+                    # Display as a clean table on the main screen
+                    st.dataframe(
+                        display_pois, 
+                        hide_index=True, 
+                        use_container_width=True,
+                        column_config={
+                            "Site Web": st.column_config.LinkColumn("Site Web")
+                        }
+                    )
+                else:
+                    st.write("Aucune activité trouvée selon ces critères.")
+                    
+                st.divider() # Add a visual separator between destinations
+            return results
 
 def map_selector(display_area):
     st.sidebar.write("Choisissez un fond avant les données.")
@@ -133,15 +139,8 @@ def map_selector(display_area):
         layers.append(scatter_layer)
 
     heatmap_choice = st.sidebar.radio(
-        "Cartes de chaleur:",
-        [
-            "Aucune",
-            "POI naturels",
-            "POI historiques",
-            "POI évenementiels",
-            "Parcs d'attraction",
-            "Gares et proximité de POI",
-        ],
+        "Cartes de chaleur:", 
+        ["Aucune", "POI naturels", "POI historiques", "POI évenementiels", "Parcs d'attraction", "Gares et proximité de POI"]
     )
     if heatmap_choice == "POI naturels":
         heatmap_layer = grab_poi_data("npoi")
@@ -158,8 +157,21 @@ def map_selector(display_area):
     if heatmap_choice == "Gares et proximité de POI":
         heatmap_layer = grab_station_proximity_data()
         layers = [heatmap_layer] + layers
-    box = st.sidebar.expander("Itinéraire", expanded=True)
-    layers = layers + itinerary_sidebar(box)
+
+    map_layers = []
+    
+    if st.session_state.get("selected_itinerary"):
+        network, start_seconds = date_time_inputs()
+        gtfs_stations = network[0]
+
+        name_to_id = {s["name"]: sid for sid, s in gtfs_stations.items()}
+        origin_id = name_to_id.get(st.session_state.departure_name)
+        destination_id = name_to_id.get(st.session_state.selected_itinerary)
+
+        if origin_id and destination_id:
+            map_layers = journey_panel(network, origin_id, destination_id, start_seconds)
+
+    layers = layers + map_layers # + itinerary_sidebar()
 
     recommandations = destination_recommender_ui()
     st.write(recommandations)
@@ -167,91 +179,66 @@ def map_selector(display_area):
     if st.session_state.selected_map:
         render_map(display_area, st.session_state.selected_map, layers)
     else:
-        display_area.write(
-            "Sélectionnez une option dans la barre latérale pour afficher la carte correspondante."
-        )
+        display_area.write("Sélectionnez une option dans la barre latérale pour afficher la carte correspondante.")
 
 
 def normalize_visitors(visitors):
     # Increased minimum radius so base stations are visible at national zoom
-    min_radius = 3  # 500 for meters
-    max_radius = 30  # 20000 for meters
-
+    min_radius = 3 # 500 for meters
+    max_radius = 30 # 20000 for meters
+    
     # Using Square Root scaling to prevent Gare du Nord from squashing the rest of the data
     sqrt_visitors = np.sqrt(visitors)
     min_sqrt = np.sqrt(0)
     max_sqrt = np.sqrt(275993741)
 
-    normalized_radius = ((sqrt_visitors - min_sqrt) / (max_sqrt - min_sqrt)) * (
-        max_radius - min_radius
-    ) + min_radius
+    normalized_radius = ((sqrt_visitors - min_sqrt) / (max_sqrt - min_sqrt)) * (max_radius - min_radius) + min_radius
     return normalized_radius
 
-
 def grab_poi_data(poi_type):
-    df = pd.read_csv("data/" + poi_type + ".csv", sep=",")
+    df=pd.read_csv("data/"+poi_type+".csv", sep=",")
 
     heatmap_layer = pdk.Layer(
         "HeatmapLayer",
         data=df,
         get_position="[Longitude, Latitude]",
         opacity=0.9,
-        radiusPixels=50,  # Adjust the spread of the heat
+        radiusPixels=50,     # Adjust the spread of the heat
     )
     return heatmap_layer
 
-
 def station_selector(display_area):
-    df_dep = pd.read_csv("data/departements-france.csv", sep=",")
+    df_dep= pd.read_csv("data/departements-france.csv", sep=",")
     df_stations = pd.read_csv("data/stations.csv", sep=",")
     df_poi = pd.read_csv("data/station_poi_index.csv", sep=",")
-    st.session_state.selected_department = st.sidebar.selectbox(
-        "Choisissez un département:",
-        df_dep["nom_departement"],
-        index=None,
-        placeholder="Filtrage par département",
-    )
+    st.session_state.selected_department = st.sidebar.selectbox("Choisissez un département:", df_dep["nom_departement"], index = None, placeholder="Filtrage par département")
     if st.session_state.selected_department:
-        dep_number = df_dep[
-            df_dep["nom_departement"] == st.session_state.selected_department
-        ]["code_departement"].values[0]
+        dep_number = df_dep[df_dep["nom_departement"] == st.session_state.selected_department]["code_departement"].values[0]
         filtered_stations = df_stations[df_stations["departement"] == dep_number]
-        st.session_state.selected_station = st.sidebar.selectbox(
-            "Choisissez une gare:", filtered_stations["name"]
-        )
+        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"])
     else:
-        st.session_state.selected_station = st.sidebar.selectbox(
-            "Choisissez une gare:", df_stations["name"], index=None, placeholder="Gares"
-        )
+        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", df_stations["name"], index = None, placeholder = "Gares")
     if st.session_state.selected_station:
-        station_index = df_stations[
-            df_stations["name"] == st.session_state.selected_station
-        ]["station_id"].values[0]
+        station_index = df_stations[df_stations["name"] == st.session_state.selected_station]["station_id"].values[0]
         poi_list = df_poi[df_poi["station_id"] == station_index]["poi_index"]
-        display_area.write(
-            f"Les points d'intérêt autour de la gare {st.session_state.selected_station} sont : \n{poi_list.values}"
-        )
+        display_area.write(f"Les points d'intérêt autour de la gare {st.session_state.selected_station} sont : \n{poi_list.values}")
 
-
-def weight_poi_prox(poi_count_20km, poi_count_15km, poi_count_10km, poi_count_5km):
-    weights = {"20km": 0.2, "15km": 0.3, "10km": 0.4, "5km": 0.5}
-    weighted_sum = (
-        weights["20km"] * poi_count_20km
-        + weights["15km"] * poi_count_15km
-        + weights["10km"] * poi_count_10km
-        + weights["5km"] * poi_count_5km
-    )
+def weight_poi_prox(poi_count_20km,poi_count_15km,poi_count_10km,poi_count_5km):
+    weights = {
+        '20km': 0.2,
+        '15km': 0.3,
+        '10km': 0.4,
+        '5km': 0.5
+    }
+    weighted_sum = (weights['20km'] * poi_count_20km +
+                    weights['15km'] * poi_count_15km +
+                    weights['10km'] * poi_count_10km +
+                    weights['5km'] * poi_count_5km)
     return weighted_sum
-
 
 def grab_station_proximity_data():
     df = pd.read_csv("data/station_features.csv", sep=",")
-    df["weight_proximity"] = weight_poi_prox(
-        df["poi_count_20km"],
-        df["poi_count_15km"],
-        df["poi_count_10km"],
-        df["poi_count_5km"],
-    )
+    df["weight_proximity"] = weight_poi_prox(df["poi_count_20km"], df["poi_count_15km"], df["poi_count_10km"], df["poi_count_5km"])
 
     heatmap_layer = pdk.Layer(
         "HeatmapLayer",
@@ -259,13 +246,12 @@ def grab_station_proximity_data():
         get_position="[lon, lat]",
         get_weight="weight_proximity",
         opacity=0.9,
-        radiusPixels=100,  # Adjust the spread of the heat
+        radiusPixels=100,     # Adjust the spread of the heat
     )
-    return heatmap_layer
-
+    return heatmap_layer    
 
 def grab_station_data():
-    df = pd.read_csv("data/stations.csv", sep=",")
+    df= pd.read_csv("data/stations.csv", sep=",")
     df["map_radius"] = normalize_visitors(df["visitors"])
 
     scatter_layer = pdk.Layer(
@@ -278,17 +264,15 @@ def grab_station_data():
         get_radius="[map_radius]",  # Radius in meters
         # radius_max_pixels=30,
         # radius_min_pixels=3,
-        radius_units=String("pixels"),
-        pickable=True,  # Allows hovering/clicking
+        radius_units = String("pixels"),
+        pickable=True,     # Allows hovering/clicking
     )
     return scatter_layer
-
 
 def main():
     display_area = st.empty()
     map_selector(display_area)
     # station_selector(display_area)
-
 
 if __name__ == "__main__":
     main()
