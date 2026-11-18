@@ -40,9 +40,6 @@ class RecommendationCriteria:
     radius_km: int = 10
     departure_station: str | None = None  # Accepte un nom de gare ou un station_id
     max_distance_km: float | None = None
-    max_travel_minutes: float | None = None  # Compatibilité; ignoré par recommend()
-    travel_date: str | None = None
-    departure_time: str = "07:00"
     exclude_paris: bool = False
 
     def __post_init__(self) -> None:
@@ -365,8 +362,6 @@ def main() -> None:
         radius_km=10,
         departure_station="Paris Est",
         max_distance_km=300,
-        travel_date="20261118",
-        departure_time="15:53",
         exclude_paris=True,
     )
 
