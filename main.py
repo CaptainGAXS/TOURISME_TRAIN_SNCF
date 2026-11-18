@@ -6,6 +6,110 @@ import numpy as np # type: ignore
 
 from show_map import render_map
 from scripts.itinerary.itinerary_ui import itinerary_sidebar
+from scripts.research.recommender import RecommendationCriteria, TourismRecommender, get_top_pois_for_recommendations
+from scripts.research.station_features import load_pois
+
+def destination_recommender_ui():
+    st.sidebar.header("Recommandation de destination")
+    
+    # Load stations for the dropdown
+    stations_df = pd.read_csv("data/station_features.csv", dtype={"station_id": "string", "departement": "string"})
+    station_names = stations_df["name"].sort_values().tolist()
+
+    # 1. User Inputs (Sidebar)
+    departure = st.sidebar.selectbox("Gare de départ", station_names, index=station_names.index("Paris Est") if "Paris Est" in station_names else 0)
+    max_distance = st.sidebar.slider("Distance max (km)", 10.0, 1000.0, 200.0, step=10.0)
+    
+    st.sidebar.subheader("Préférences thématiques")
+    weight_culture = st.sidebar.slider("Culture", 0.0, 1.0, 0.25)
+    weight_nature = st.sidebar.slider("Nature", 0.0, 1.0, 0.25)
+    weight_events = st.sidebar.slider("Événements", 0.0, 1.0, 0.25)
+    weight_attractions = st.sidebar.slider("Attractions", 0.0, 1.0, 0.25)
+    
+    exclude_paris_option = st.sidebar.checkbox("Exclure Paris et l'Île-de-France", value=False)
+
+    if st.sidebar.button("Rechercher des gares"):
+        if sum([weight_culture, weight_nature, weight_events, weight_attractions]) == 0:
+            st.sidebar.error("Veuillez sélectionner au moins une préférence > 0.")
+            return None
+
+        # 2. Setup Criteria using max_distance_km
+        criteria = RecommendationCriteria(
+            culture=weight_culture,
+            nature=weight_nature,
+            events=weight_events,
+            attractions=weight_attractions,
+            departure_station=departure,
+            max_distance_km=max_distance,
+            exclude_paris=exclude_paris_option
+        )
+
+        with st.spinner("Recherche des meilleures destinations et activités..."):
+            try:
+                # 3. Run the Recommender for stations
+                recommender = TourismRecommender().fit(stations_df)
+                results = recommender.recommend(criteria, n_results=5)
+                
+                # 4. Load POI data and spatial indexes
+                pois = load_pois()
+                station_poi_index = pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
+                
+                # 5. Fetch the Top 10 POIs for these recommendations
+                top_pois = get_top_pois_for_recommendations(
+                    results,
+                    criteria,
+                    pois,
+                    station_poi_index,
+                    n_pois=10, 
+                    favor_poi_with_website=recommender.favor_poi_with_website
+                )
+                
+                # 6. Display Results on the MAIN SCREEN
+                st.success("Destinations recommandées trouvées !")
+                
+                for _, station in results.iterrows():
+                    # Display the station name and straight-line distance cleanly
+                    st.subheader(f"{station['name']} — {station['distance_from_departure_km']:.0f} km")
+                    
+                    # Filter the top_pois dataframe for just this station
+                    station_pois = top_pois[top_pois["station_name"] == station["name"]]
+                    
+                    if not station_pois.empty:
+                        # Select relevant columns including the website
+                        display_pois = station_pois[["Nom", "category", "distance_km", "Site internet"]].copy()
+                        
+                        # Format the distance
+                        display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
+                        
+                        # Clean up missing websites for a better display
+                        display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
+                        
+                        # Rename columns for the user interface
+                        display_pois.rename(columns={
+                            "category": "Catégorie", 
+                            "distance_km": "Distance",
+                            "Site internet": "Site Web"
+                        }, inplace=True)
+                        
+                        # Display as a clean table on the main screen
+                        st.dataframe(
+                            display_pois, 
+                            hide_index=True, 
+                            use_container_width=True,
+                            column_config={
+                                "Site Web": st.column_config.LinkColumn("Site Web")
+                            }
+                        )
+                    else:
+                        st.write("Aucune activité trouvée selon ces critères.")
+                        
+                    st.divider() # Add a visual separator between destinations
+                
+                return results
+
+            except ValueError as e:
+                st.sidebar.error(f"Erreur: {str(e)}")
+                return None
 
 def map_selector(display_area):
     st.sidebar.write("Choisissez un fond avant les données.")
@@ -48,6 +152,9 @@ def map_selector(display_area):
         layers = [heatmap_layer] + layers
 
     layers = layers + itinerary_sidebar()
+
+    recommandations = destination_recommender_ui()
+    st.write(recommandations)
 
     if st.session_state.selected_map:
         render_map(display_area, st.session_state.selected_map, layers)
