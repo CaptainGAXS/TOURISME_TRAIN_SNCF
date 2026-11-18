@@ -12,8 +12,9 @@ Output:
     trips       {trip_id: {"kind", "number", "stops": [station_id, ...]}}
     footpaths   {station_id: [(other_station_id, seconds, mode), ...]}
                 mode "walk": stations closer than MAX_WALK_METERS
-                mode "metro/RER": between the SNCF stations of the Paris area, from
-                data/paris_transfers.csv (built by scripts/data_prep/build_paris_transfers.py)
+                other modes ("metro/RER", "tram", "bus"...): local public transport between
+                SNCF stations of the same city, from data/station_transfers.csv
+                (built by scripts/data_prep/build_station_transfers.py)
 """
 
 import math
@@ -25,7 +26,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 GTFS_ZIP = ROOT / "data" / "gtfs_sncf.zip"
-PARIS_TRANSFERS_CSV = ROOT / "data" / "paris_transfers.csv"
+STATION_TRANSFERS_CSV = ROOT / "data" / "station_transfers.csv"
 
 MAX_WALK_METERS = 1000  # walk between two stations if they are closer than this
 WALK_SPEED = 4.5 / 3.6  # m/s (4.5 km/h)
@@ -97,12 +98,12 @@ def build_footpaths(stations):
                 footpaths[a].append((b, seconds, "walk"))
                 footpaths[b].append((a, seconds, "walk"))
 
-    # metro/RER between the SNCF stations of the Paris area (one row per direction)
-    transfers = pd.read_csv(PARIS_TRANSFERS_CSV, dtype={"from_uic": str, "to_uic": str})
+    # local public transport between SNCF stations of the same city (one row per direction)
+    transfers = pd.read_csv(STATION_TRANSFERS_CSV, dtype={"from_uic": str, "to_uic": str})
     for row in transfers.itertuples():
         a, b = "StopArea:OCE" + row.from_uic, "StopArea:OCE" + row.to_uic
         if a in stations and b in stations:
-            footpaths[a].append((b, row.minutes * 60, "metro/RER"))
+            footpaths[a].append((b, row.minutes * 60, row.mode))
     return footpaths
 
 
