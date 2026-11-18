@@ -14,10 +14,16 @@ import sys
 
 sys.path.append("scripts/itinerary")  # for itinerary_ui.py
 
-from carbon import car_co2, journey_co2, leg_co2
-from network import load_network
-from planner import describe, plan
-from route_map import journey_layers
+try:
+    from .carbon import car_co2, journey_co2, leg_co2
+    from .network import load_network
+    from .planner import describe, plan
+    from .route_map import journey_layers
+except ImportError:
+    from carbon import car_co2, journey_co2, leg_co2
+    from network import load_network
+    from planner import describe, plan
+    from route_map import journey_layers
 
 
 def co2_text(kg):

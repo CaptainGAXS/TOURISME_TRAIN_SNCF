@@ -7,7 +7,10 @@ import argparse
 import sys
 import unicodedata
 
-from network import load_network
+try:
+    from .network import load_network
+except ImportError:
+    from network import load_network
 
 TRANSFER_SECONDS = 10 * 60  # minimum time to change trains
 

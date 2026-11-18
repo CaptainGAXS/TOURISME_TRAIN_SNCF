@@ -10,8 +10,12 @@ Source: SNCF open data "Emissions de CO2e - perimetre complet"
 
 import pandas as pd
 
-from network import ROOT, distance_m
-from planner import leg_stations
+try:
+    from .network import ROOT, distance_m
+    from .planner import leg_stations
+except ImportError:
+    from network import ROOT, distance_m
+    from planner import leg_stations
 
 CO2_CSV = ROOT / "data" / "emission_co2_sncf.csv"
 
