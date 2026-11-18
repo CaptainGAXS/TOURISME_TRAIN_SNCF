@@ -18,6 +18,7 @@ Output:
 
 import math
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -105,6 +106,7 @@ def build_footpaths(stations):
     return footpaths
 
 
+@lru_cache(maxsize=14)
 def load_network(date):
     """date: 'YYYYMMDD'. Returns stations, connections, trips, footpaths for that day."""
     stations, platform_to_station = load_stations()
