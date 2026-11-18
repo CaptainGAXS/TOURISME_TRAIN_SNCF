@@ -3,7 +3,10 @@ Turn a journey (list of legs from planner.py) into pydeck layers.
 deck = pdk.Deck(layers=[other_layer] + journey_layers(legs, stations, trips), ...)
 """
 
-from planner import hhmm, leg_stations
+try:
+    from .planner import hhmm, leg_stations
+except ImportError:
+    from planner import hhmm, leg_stations
 import pandas as pd
 import pydeck as pdk
 
