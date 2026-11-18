@@ -7,6 +7,9 @@ deck = pdk.Deck(layers=[other_layer] + layers, ...)
 from datetime import date, time, timedelta
 
 import streamlit as st
+import sys
+
+sys.path.append("scripts/itinerary")  # for itinerary_ui.py
 
 from carbon import car_co2, journey_co2, leg_co2
 from network import load_network
