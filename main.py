@@ -5,6 +5,7 @@ import pydeck as pdk # type: ignore
 import numpy as np # type: ignore
 
 from show_map import render_map
+from scripts.itinerary.itinerary_ui import itinerary_sidebar
 
 def map_selector(display_area):
     st.sidebar.write("Choisissez un fond avant les données.")
@@ -46,10 +47,13 @@ def map_selector(display_area):
         heatmap_layer = grab_station_proximity_data()
         layers = [heatmap_layer] + layers
 
+    layers = layers + itinerary_sidebar()
+
     if st.session_state.selected_map:
         render_map(display_area, st.session_state.selected_map, layers)
     else:
         display_area.write("Sélectionnez une option dans la barre latérale pour afficher la carte correspondante.")
+
 
 def normalize_visitors(visitors):
     # Increased minimum radius so base stations are visible at national zoom
@@ -84,7 +88,7 @@ def station_selector(display_area):
     if st.session_state.selected_department:
         dep_number = df_dep[df_dep["nom_departement"] == st.session_state.selected_department]["code_departement"].values[0]
         filtered_stations = df_stations[df_stations["departement"] == dep_number]
-        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"], index = None, placeholer= "Gares du département choisi")
+        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"])
     else:
         st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", df_stations["name"], index = None, placeholder = "Gares")
     if st.session_state.selected_station:
