@@ -85,7 +85,7 @@ def load_stations() -> pd.DataFrame:
     """Charge les gares en conservant les identifiants comme du texte."""
     return pd.read_csv(
         ROOT / "data" / "stations.csv",
-        dtype={"station_id": "string", "uic": "string", "insee": "string"},
+        dtype={"station_id": "string", "departement": "string"},
     )
 
 

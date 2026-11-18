@@ -216,17 +216,15 @@ class TourismRecommender:
             raise ValueError("A departure station is required with max_distance_km")
 
         if criteria.exclude_ile_de_france:
-            if "insee" not in candidates:
-                raise ValueError("The insee column is required for this filter")
-            insee_departments = (
-                candidates["insee"]
+            if "departement" not in candidates:
+                raise ValueError("The departement column is required for this filter")
+            departments = (
+                candidates["departement"]
                 .astype("string")
                 .str.strip()
-                .str.zfill(5)
-                .str[:2]
             )
             candidates = candidates[
-                ~insee_departments.isin(ILE_DE_FRANCE_DEPARTMENTS)
+                ~departments.isin(ILE_DE_FRANCE_DEPARTMENTS)
             ]
 
         if candidates.empty:
