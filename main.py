@@ -5,9 +5,10 @@ import pydeck as pdk  # type: ignore
 import numpy as np  # type: ignore
 
 from show_map import render_map
-from scripts.itinerary.itinerary_ui import itinerary_sidebar
+from scripts.itinerary.itinerary_ui import itinerary_sidebar,date_time_inputs, journey_panel
 from scripts.research.recommender import RecommendationCriteria, TourismRecommender, get_top_pois_for_recommendations
 from scripts.research.station_features import load_pois
+from datetime import date, time, timedelta
 
 def destination_recommender_ui():
     st.sidebar.header("Recommandation de destination")
@@ -45,72 +46,77 @@ def destination_recommender_ui():
         )
 
         with st.spinner("Recherche des meilleures destinations et activités..."):
-            try:
-                # 3. Run the Recommender for stations
-                recommender = TourismRecommender().fit(stations_df)
-                results = recommender.recommend(criteria, n_results=5)
-                
-                # 4. Load POI data and spatial indexes
-                pois = load_pois()
-                station_poi_index = pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
-                
-                # 5. Fetch the Top 10 POIs for these recommendations
-                top_pois = get_top_pois_for_recommendations(
-                    results,
-                    criteria,
-                    pois,
-                    station_poi_index,
-                    n_pois=10, 
-                    favor_poi_with_website=recommender.favor_poi_with_website
-                )
-                
-                # 6. Display Results on the MAIN SCREEN
-                st.success("Destinations recommandées trouvées !")
-                
-                for _, station in results.iterrows():
-                    # Display the station name and straight-line distance cleanly
-                    st.subheader(f"{station['name']} — {station['distance_from_departure_km']:.0f} km")
-                    
-                    # Filter the top_pois dataframe for just this station
-                    station_pois = top_pois[top_pois["station_name"] == station["name"]]
-                    
-                    if not station_pois.empty:
-                        # Select relevant columns including the website
-                        display_pois = station_pois[["Nom", "category", "distance_km", "Site internet"]].copy()
-                        
-                        # Format the distance
-                        display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
-                        
-                        # Clean up missing websites for a better display
-                        display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
-                        
-                        # Rename columns for the user interface
-                        display_pois.rename(columns={
-                            "category": "Catégorie", 
-                            "distance_km": "Distance",
-                            "Site internet": "Site Web"
-                        }, inplace=True)
-                        
-                        # Display as a clean table on the main screen
-                        st.dataframe(
-                            display_pois, 
-                            hide_index=True, 
-                            use_container_width=True,
-                            column_config={
-                                "Site Web": st.column_config.LinkColumn("Site Web")
-                            }
-                        )
-                    else:
-                        st.write("Aucune activité trouvée selon ces critères.")
-                        
-                    st.divider() # Add a visual separator between destinations
-                
-                return results
+            # 3. Run the Recommender for stations
+            recommender = TourismRecommender().fit(stations_df)
+            results = recommender.recommend(criteria, n_results=5)
+            
+            # 4. Load POI data and spatial indexes
+            pois = load_pois()
+            station_poi_index = pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
+            
+            # 5. Fetch the Top 10 POIs for these recommendations
+            top_pois = get_top_pois_for_recommendations(
+                results,
+                criteria,
+                pois,
+                station_poi_index,
+                n_pois=10, 
+                favor_poi_with_website=recommender.favor_poi_with_website
+            )
 
-            except ValueError as e:
-                st.sidebar.error(f"Erreur: {str(e)}")
-                return None
+            # SAVE TO SESSION STATE
+            st.session_state.reco_results = results
+            st.session_state.reco_pois = top_pois
+            st.session_state.departure_name = departure
+            st.session_state.selected_itinerary = None # Reset selected itinerary
+                
+    if "reco_results" in st.session_state:
+            st.success("Destinations recommandées trouvées !")
+            results = st.session_state.reco_results
+            top_pois = st.session_state.reco_pois
+        
+            for _, station in results.iterrows():
+                # Display the station name and straight-line distance cleanly
+                st.subheader(f"{station['name']} — {station['distance_from_departure_km']:.0f} km")
 
+                if st.button(f"Voir les trains pour {station['name']}", key=f"itin_{station['station_id']}"):
+                    st.session_state.selected_itinerary = station['name']
+                    st.rerun()
+                
+                # Filter the top_pois dataframe for just this station
+                station_pois = top_pois[top_pois["station_name"] == station["name"]]
+                
+                if not station_pois.empty:
+                    # Select relevant columns including the website
+                    display_pois = station_pois[["Nom", "category", "distance_km", "Site internet"]].copy()
+                    
+                    # Format the distance
+                    display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
+                    
+                    # Clean up missing websites for a better display
+                    display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
+                    
+                    # Rename columns for the user interface
+                    display_pois.rename(columns={
+                        "category": "Catégorie", 
+                        "distance_km": "Distance",
+                        "Site internet": "Site Web"
+                    }, inplace=True)
+                    
+                    # Display as a clean table on the main screen
+                    st.dataframe(
+                        display_pois, 
+                        hide_index=True, 
+                        use_container_width=True,
+                        column_config={
+                            "Site Web": st.column_config.LinkColumn("Site Web")
+                        }
+                    )
+                else:
+                    st.write("Aucune activité trouvée selon ces critères.")
+                    
+                st.divider() # Add a visual separator between destinations
+            return results
 
 def map_selector(display_area):
     st.sidebar.write("Choisissez un fond avant les données.")
@@ -158,8 +164,21 @@ def map_selector(display_area):
     if heatmap_choice == "Gares et proximité de POI":
         heatmap_layer = grab_station_proximity_data()
         layers = [heatmap_layer] + layers
-    box = st.sidebar.expander("Itinéraire", expanded=True)
-    layers = layers + itinerary_sidebar(box)
+
+    map_layers = []
+    
+    if st.session_state.get("selected_itinerary"):
+        network, start_seconds = date_time_inputs()
+        gtfs_stations = network[0]
+
+        name_to_id = {s["name"]: sid for sid, s in gtfs_stations.items()}
+        origin_id = name_to_id.get(st.session_state.departure_name)
+        destination_id = name_to_id.get(st.session_state.selected_itinerary)
+
+        if origin_id and destination_id:
+            map_layers = journey_panel(network, origin_id, destination_id, start_seconds)
+
+    layers = layers + map_layers # + itinerary_sidebar()
 
     recommandations = destination_recommender_ui()
     st.write(recommandations)
