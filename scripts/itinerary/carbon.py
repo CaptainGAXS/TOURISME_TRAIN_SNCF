@@ -86,8 +86,8 @@ def leg_km(leg, stations, trips):
 
 
 def leg_co2(leg, stations, trips):
-    """kgCO2e of one leg (0 for walking and for the metro/RER transfers in Paris,
-    which are short and not in the SNCF table)."""
+    """kgCO2e of one leg (0 for walking and for the local transport between stations
+    of the same city, which is short and not in the SNCF table)."""
     if leg["mode"] != "train":
         return 0.0
     grams_per_km = GRAMS_PER_KM.get(trips[leg["trip"]]["kind"], OTHER_GRAMS_PER_KM)
