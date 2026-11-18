@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from pathlib import Path
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -7,326 +7,380 @@ from sklearn.cluster import KMeans
 from sklearn.neighbors import BallTree
 from sklearn.preprocessing import StandardScaler
 
+from scripts.research.station_features import (
+    EARTH_RADIUS_KM,
+    RADIUSES_KM,
+    ROOT,
+    load_pois,
+)
 
-# Racine du projet et correspondance entre préférences et fichiers de POI.
-ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Correspondance entre préférences utilisateur et préfixes des colonnes de POI
 CATEGORY_COLUMNS = {
     "culture": "hpoi",
     "nature": "npoi",
     "events": "epoi",
     "attractions": "attraction",
 }
-RADIUSES_KM = (20, 15, 10, 5, 3, 1)
-POI_CATEGORY_BY_TYPE = {
-    "hpoi": "culture",
-    "npoi": "nature",
-    "epoi": "events",
-    "attraction": "attractions",
-}
-# Départements composant la région Île-de-France.
-ILE_DE_FRANCE_DEPARTMENTS = frozenset(
-    {"75", "77", "78", "91", "92", "93", "94", "95"}
-)
+POI_CATEGORY_BY_TYPE = {prefix: cat for cat, prefix in CATEGORY_COLUMNS.items()}
+
+# Départements de la région parisienne (Île-de-France)
+PARIS_REGION_DEPARTMENTS = frozenset({"75", "77", "78", "91", "92", "93", "94", "95"})
+
 
 
 @dataclass(frozen=True)
 class RecommendationCriteria:
-    """Paramètres utilisés pour filtrer et classer les destinations."""
+    """Paramètres de recherche exposés à l'utilisateur."""
 
     culture: float = 0.25
     nature: float = 0.25
     events: float = 0.25
     attractions: float = 0.25
     radius_km: int = 10
-    prefer_popular: float = 0.25
-    min_visitors: float = 0
-    n_results: int = 10
-    departure_station_id: str | None = None
-    departure_station_name: str | None = None
+    departure_station: str | None = None  # Accepte un nom de gare ou un station_id
     max_distance_km: float | None = None
-    exclude_ile_de_france: bool = False
-    favor_poi_with_website: bool = True
+    max_travel_minutes: float | None = None
+    travel_date: str | None = None
+    departure_time: str = "07:00"
+    exclude_paris: bool = False
 
-    def preferences(self) -> dict[str, float]:
-        """Valide et normalise les préférences touristiques."""
-        values = {
+    def __post_init__(self) -> None:
+        """Vérifie la cohérence des critères dès leur création."""
+        prefs = (self.culture, self.nature, self.events, self.attractions)
+        if any(p < 0 or p > 1 for p in prefs):
+            raise ValueError("Les préférences doivent être comprises entre 0 et 1.")
+        if sum(prefs) == 0:
+            raise ValueError("Au moins une préférence touristique doit être > 0.")
+        if self.radius_km not in RADIUSES_KM:
+            raise ValueError(f"radius_km doit faire partie de {RADIUSES_KM}.")
+        if self.max_distance_km is not None:
+            if self.max_distance_km <= 0:
+                raise ValueError("max_distance_km doit être strictement positif.")
+            if not self.departure_station:
+                raise ValueError("Une gare de départ est requise avec max_distance_km.")
+        if self.max_travel_minutes is not None:
+            if self.max_travel_minutes <= 0:
+                raise ValueError("max_travel_minutes doit être strictement positif.")
+            if not self.departure_station:
+                raise ValueError("Une gare de départ est requise avec max_travel_minutes.")
+            if not self.travel_date:
+                raise ValueError("travel_date est requis avec max_travel_minutes.")
+            if len(self.travel_date) != 8 or not self.travel_date.isdigit():
+                raise ValueError("travel_date doit avoir le format YYYYMMDD.")
+            try:
+                hours, minutes = (int(part) for part in self.departure_time.split(":"))
+            except (AttributeError, TypeError, ValueError):
+                raise ValueError("departure_time doit avoir le format HH:MM.")
+            if not (0 <= hours <= 23 and 0 <= minutes <= 59):
+                raise ValueError("departure_time doit avoir le format HH:MM.")
+
+    def normalized_preferences(self) -> dict[str, float]:
+        """Normalise les poids des 4 préférences pour que leur somme vaille 1."""
+        raw = {
             "culture": self.culture,
             "nature": self.nature,
             "events": self.events,
             "attractions": self.attractions,
         }
-        if any(value < 0 or value > 1 for value in values.values()):
-            raise ValueError("Preferences must be between 0 and 1")
-        if sum(values.values()) == 0:
-            raise ValueError("At least one tourism preference must be positive")
-        if self.radius_km not in RADIUSES_KM:
-            raise ValueError(f"radius_km must be one of {RADIUSES_KM}")
-        if not 0 <= self.prefer_popular <= 1:
-            raise ValueError("prefer_popular must be between 0 and 1")
-        if self.n_results <= 0:
-            raise ValueError("n_results must be positive")
-        if self.departure_station_id and self.departure_station_name:
-            raise ValueError(
-                "Provide only one of departure_station_id or departure_station_name"
-            )
-        if self.max_distance_km is not None:
-            if self.max_distance_km <= 0:
-                raise ValueError("max_distance_km must be positive")
-            if not self.departure_station_id and not self.departure_station_name:
-                raise ValueError(
-                    "A departure station is required with max_distance_km"
-                )
-        # La somme vaut 1 pour rendre les scores comparables.
-        total = sum(values.values())
-        return {name: value / total for name, value in values.items()}
+        total = sum(raw.values())
+        return {category: weight / total for category, weight in raw.items()}
 
 
 class TourismRecommender:
-    """Regroupe les gares puis les classe selon les préférences utilisateur."""
+    """Moteur de recommandation de gares basé sur le clustering K-Means."""
 
-    def __init__(self, n_clusters: int = 6, random_state: int = 42):
+    def __init__(
+        self,
+        n_clusters: int = 6,
+        min_visitors: float = 10_000,
+        popularity_weight: float = 0.25,
+        favor_poi_with_website: bool = True,
+        random_state: int = 42,
+    ):
+        """Initialise les hyperparamètres internes du modèle de recommandation.
+
+        Paramètres internes :
+        - n_clusters : nombre de groupes touristiques (K-Means).
+        - min_visitors : seuil minimal de fréquentation annuelle des gares.
+        - popularity_weight : poids accordé à la fréquentation dans le score final (0 à 1).
+        - favor_poi_with_website : privilégie les compteurs pondérés par présence d'un site web.
+        """
         if n_clusters < 2:
-            raise ValueError("n_clusters must be at least 2")
+            raise ValueError("n_clusters doit être au moins égal à 2.")
+        if min_visitors < 0:
+            raise ValueError("min_visitors doit être positif ou nul.")
+        if not 0 <= popularity_weight <= 1:
+            raise ValueError("popularity_weight doit être compris entre 0 et 1.")
+
         self.n_clusters = n_clusters
+        self.min_visitors = min_visitors
+        self.popularity_weight = popularity_weight
+        self.favor_poi_with_website = favor_poi_with_website
         self.random_state = random_state
-        self._stations = None
-        self._model = None
+
+        self._stations: pd.DataFrame | None = None
         self._cluster_profiles: pd.DataFrame | None = None
 
-    def fit(self, stations: pd.DataFrame) -> "TourismRecommender":
-        """Entraîne K-Means sur les features touristiques des gares."""
-        # Les compteurs à 10 km décrivent le profil touristique de chaque gare.
-        category_columns = {
-            category: (
-                f"{prefix}_website_weighted_count_10km"
-                if f"{prefix}_website_weighted_count_10km" in stations
-                else f"{prefix}_count_10km"
-            )
-            for category, prefix in CATEGORY_COLUMNS.items()
-        }
-        missing = set(category_columns.values()) - set(stations.columns)
-        if missing:
-            raise ValueError(
-                f"Missing station features: {', '.join(sorted(missing))}"
-            )
+    def _get_feature_column(self, df: pd.DataFrame, prefix: str, radius_km: int) -> str:
+        """Retourne la colonne pondérée (site web) si activée et disponible, sinon la brute."""
+        weighted_col = f"{prefix}_website_weighted_count_{radius_km}km"
+        if self.favor_poi_with_website and weighted_col in df.columns:
+            return weighted_col
+        return f"{prefix}_count_{radius_km}km"
 
-        model_data = stations.copy()
-        tourism_columns = list(category_columns.values())
-        tourism_values = pd.DataFrame(
-            np.log1p(model_data[tourism_columns].fillna(0)),
-            index=model_data.index,
-            columns=tourism_columns,
+    def fit(self, stations: pd.DataFrame) -> "TourismRecommender":
+        """Entraîne K-Means pour regrouper les gares selon leur profil touristique."""
+        # On utilise le rayon de référence de 10 km pour caractériser chaque gare
+        ref_columns = {
+            cat: self._get_feature_column(stations, prefix, radius_km=10)
+            for cat, prefix in CATEGORY_COLUMNS.items()
+        }
+        missing = set(ref_columns.values()) - set(stations.columns)
+        if missing:
+            raise ValueError(f"Colonnes manquantes dans stations : {', '.join(sorted(missing))}")
+
+        # Conversion en tableau NumPy avant renommage des colonnes pour éviter les NaN d'alignement
+        raw_tourism = (
+            stations[list(ref_columns.values())]
+            .apply(pd.to_numeric, errors="coerce")
+            .fillna(0)
+            .clip(lower=0)
+            .to_numpy()
         )
-        popularity = pd.Series(
-            np.log1p(model_data["visitors"].fillna(0).clip(lower=0)),
-            index=model_data.index,
+        tourism_log = pd.DataFrame(
+            np.log1p(raw_tourism),
+            index=stations.index,
+            columns=list(ref_columns.keys()),
+        )
+
+        raw_visitors = (
+            pd.to_numeric(stations["visitors"], errors="coerce")
+            .fillna(0)
+            .clip(lower=0)
+            .to_numpy()
+        )
+        popularity_log = pd.Series(
+            np.log1p(raw_visitors),
+            index=stations.index,
             name="popularity",
         )
-        matrix = pd.concat([tourism_values, popularity], axis=1)
 
-        # La standardisation évite que la fréquentation domine les autres données.
-        scaled_matrix = StandardScaler().fit_transform(matrix)
-        self._model = KMeans(
-            n_clusters=min(self.n_clusters, len(model_data)),
+        # Standardisation (moyenne 0, écart-type 1) avant K-Means
+        features_matrix = pd.concat([tourism_log, popularity_log], axis=1)
+        scaled_matrix = StandardScaler().fit_transform(features_matrix)
+
+        kmeans = KMeans(
+            n_clusters=min(self.n_clusters, len(stations)),
             n_init=10,
             random_state=self.random_state,
         ).fit(scaled_matrix)
 
-        self._stations = model_data.copy()
-        self._stations["cluster"] = self._model.labels_
+        self._stations = stations.copy()
+        self._stations["cluster"] = kmeans.labels_
 
-        # Le profil moyen de chaque cluster sert à sélectionner les clusters
-        # correspondant le mieux aux préférences de l'utilisateur.
-        normalized = tourism_values.div(
-            tourism_values.max().replace(0, 1), axis="columns"
+        # Profil touristique moyen normalisé de chaque cluster (entre 0 et 1)
+        normalized_tourism = tourism_log.div(tourism_log.max().replace(0, 1), axis="columns")
+        self._cluster_profiles = (
+            normalized_tourism.assign(cluster=kmeans.labels_)
+            .groupby("cluster")[list(CATEGORY_COLUMNS.keys())]
+            .mean()
         )
-        normalized.columns = list(category_columns.keys())
-        self._cluster_profiles = normalized.assign(
-            cluster=self._model.labels_
-        ).groupby("cluster")[list(category_columns)].mean()
         return self
 
-    def recommend(
-        self, criteria: RecommendationCriteria | None = None
+    def _resolve_departure_station(self, query: str) -> pd.Series:
+        """Recherche la gare de départ par station_id ou par nom exact."""
+        assert self._stations is not None
+        by_id = self._stations[self._stations["station_id"].astype(str).eq(query)]
+        if len(by_id) == 1:
+            return by_id.iloc[0]
+
+        by_name = self._stations[self._stations["name"].eq(query)]
+        if by_name.empty:
+            raise ValueError(f"Gare de départ introuvable : '{query}'.")
+        if len(by_name) > 1:
+            raise ValueError(f"Plusieurs gares correspondent à '{query}' ; préciser le station_id.")
+        return by_name.iloc[0]
+
+    @staticmethod
+    def _normalize_station_name(name: object) -> str:
+        """Normalise les noms pour relier les données des gares au réseau GTFS."""
+        normalized = unicodedata.normalize("NFKD", str(name))
+        return (
+            normalized.encode("ascii", "ignore")
+            .decode()
+            .lower()
+            .replace("-", " ")
+            .strip()
+        )
+
+    def _filter_by_travel_time(
+        self,
+        candidates: pd.DataFrame,
+        departure: pd.Series,
+        criteria: RecommendationCriteria,
     ) -> pd.DataFrame:
-        """Retourne les meilleures gares selon les critères fournis."""
-        if self._stations is None:
-            raise RuntimeError("Call fit() before recommend()")
+        """Filtre les gares accessibles en moins de x minutes dans le réseau SNCF."""
+        if criteria.max_travel_minutes is None:
+            return candidates
+
+        from scripts.itinerary.network import load_network
+        from scripts.itinerary.planner import earliest_arrival
+
+        network = load_network(criteria.travel_date)
+        gtfs_stations, connections, _trips, footpaths = network
+        gtfs_id_by_name = {
+            self._normalize_station_name(station["name"]): station_id
+            for station_id, station in gtfs_stations.items()
+        }
+
+        departure_name = self._normalize_station_name(departure["name"])
+        origin_id = gtfs_id_by_name.get(departure_name)
+        if origin_id is None:
+            raise ValueError(
+                f"La gare de départ '{departure['name']}' est absente du réseau d'itinéraire."
+            )
+
+        hours, minutes = (int(part) for part in criteria.departure_time.split(":"))
+        start_seconds = hours * 3600 + minutes * 60
+        travel_times = []
+
+        for _, candidate in candidates.iterrows():
+            destination_name = self._normalize_station_name(candidate["name"])
+            destination_id = gtfs_id_by_name.get(destination_name)
+            if destination_id is None:
+                travel_times.append(np.nan)
+                continue
+
+            legs = earliest_arrival(
+                connections,
+                footpaths,
+                origin_id,
+                destination_id,
+                start_seconds,
+            )
+            travel_times.append(
+                np.nan
+                if legs is None
+                else (legs[-1]["arr"] - start_seconds) / 60
+            )
+
+        filtered = candidates.copy()
+        filtered["travel_time_minutes"] = travel_times
+        filtered = filtered[
+            filtered["travel_time_minutes"].le(criteria.max_travel_minutes)
+        ]
+        if filtered.empty:
+            raise ValueError(
+                "Aucune gare n'est accessible dans la durée maximale demandée."
+            )
+        return filtered
+
+    def recommend(
+        self,
+        criteria: RecommendationCriteria | None = None,
+        n_results: int = 10,
+    ) -> pd.DataFrame:
+        """Recommande les meilleures gares selon les préférences et le modèle K-Means."""
+        if self._stations is None or self._cluster_profiles is None:
+            raise RuntimeError("Appeler fit() avant recommend().")
+        if n_results <= 0:
+            raise ValueError("n_results doit être strictement positif.")
+
         criteria = criteria or RecommendationCriteria()
-        preferences = criteria.preferences()
+        preferences = pd.Series(criteria.normalized_preferences())
 
-        # Première sélection : fréquentation minimale de la gare.
-        candidates = self._stations[
-            self._stations["visitors"].fillna(0).ge(criteria.min_visitors)
-        ].copy()
+        # 1. Filtre interne sur le minimum de fréquentation
+        visitors = pd.to_numeric(self._stations["visitors"], errors="coerce").fillna(0)
+        candidates = self._stations[visitors.ge(self.min_visitors)].copy()
         if candidates.empty:
-            raise ValueError("No station matches min_visitors")
+            raise ValueError("Aucune gare n'atteint le seuil minimal de fréquentation.")
 
-        # La distance de départ est calculée uniquement si une gare est fournie.
+        # 2. Calcul des distances depuis la gare de départ (si renseignée)
         candidates["distance_from_departure_km"] = np.nan
-        if criteria.departure_station_id or criteria.departure_station_name:
-            if criteria.departure_station_id:
-                departure_matches = self._stations[
-                    self._stations["station_id"].eq(criteria.departure_station_id)
-                ]
-            else:
-                departure_station_name = criteria.departure_station_name
-                assert departure_station_name is not None
-                departure_matches = self._stations[
-                    self._stations["name"].eq(departure_station_name)
-                ]
-            if departure_matches.empty:
-                raise ValueError("Departure station not found")
-            if len(departure_matches) > 1:
-                raise ValueError(
-                    "departure_station_name matches several stations; "
-                    "use departure_station_id"
-                )
+        if criteria.departure_station:
+            departure = self._resolve_departure_station(criteria.departure_station)
+            all_rad = np.radians(self._stations[["lat", "lon"]].to_numpy())
+            dep_rad = np.radians([[departure["lat"], departure["lon"]]])
 
-            departure = departure_matches.iloc[0]
-            # BallTree utilise la distance haversine sur des coordonnées en radians.
-            station_coordinates = np.radians(
-                self._stations[["lat", "lon"]].to_numpy()
-            )
-            departure_coordinates = np.radians(
-                [[departure["lat"], departure["lon"]]]
-            )
-            station_tree = BallTree(station_coordinates, metric="haversine")
-            distances, indices = station_tree.query(
-                departure_coordinates, k=len(self._stations)
-            )
-            distances_km = distances[0] * 6371.0088
-            station_distances = pd.Series(
-                distances_km,
+            tree = BallTree(all_rad, metric="haversine")
+            distances, indices = tree.query(dep_rad, k=len(self._stations))
+            dist_by_id = pd.Series(
+                distances[0] * EARTH_RADIUS_KM,
                 index=self._stations.iloc[indices[0]]["station_id"],
             )
-            candidates["distance_from_departure_km"] = candidates[
-                "station_id"
-            ].map(station_distances)
+
+            candidates["distance_from_departure_km"] = candidates["station_id"].map(dist_by_id)
+            # Exclusion de la gare de départ elle-même
+            candidates = candidates[candidates["station_id"].ne(departure["station_id"])]
             if criteria.max_distance_km is not None:
                 candidates = candidates[
-                    candidates["distance_from_departure_km"].le(
-                        criteria.max_distance_km
-                    )
+                    candidates["distance_from_departure_km"].le(criteria.max_distance_km)
                 ]
-            candidates = candidates[
-                candidates["station_id"].ne(departure["station_id"])
-            ]
-        elif criteria.max_distance_km is not None:
-            raise ValueError("A departure station is required with max_distance_km")
+            if criteria.max_travel_minutes is not None:
+                candidates = self._filter_by_travel_time(
+                    candidates,
+                    departure,
+                    criteria,
+                )
 
-        if criteria.exclude_ile_de_france:
-            if "insee" not in candidates:
-                raise ValueError("The insee column is required for this filter")
-            insee_departments = (
-                candidates["insee"]
-                .astype("string")
-                .str.strip()
-                .str.zfill(5)
-                .str[:2]
-            )
-            candidates = candidates[
-                ~insee_departments.isin(ILE_DE_FRANCE_DEPARTMENTS)
-            ]
+        # 3. Exclusion optionnelle de Paris / Île-de-France
+        if criteria.exclude_paris:
+            if "departement" not in candidates.columns:
+                raise ValueError("La colonne 'departement' est requise pour exclure Paris.")
+            depts = candidates["departement"].astype("string").str.strip()
+            candidates = candidates[~depts.isin(PARIS_REGION_DEPARTMENTS)]
 
         if candidates.empty:
-            raise ValueError("No destination station matches the search scope")
+            raise ValueError("Aucune gare ne correspond aux filtres géographiques.")
 
-        # K-Means réduit l'espace de recherche aux clusters les plus adaptés.
-        preference_vector = pd.Series(preferences)
-        cluster_profiles = self._cluster_profiles
-        if cluster_profiles is None:
-            raise RuntimeError("Call fit() before recommend()")
-        cluster_scores = cluster_profiles.dot(preference_vector)
-        cluster_count = max(1, len(cluster_scores) // 2)
-        selected_clusters = cluster_scores.nlargest(cluster_count).index
-        candidates = candidates[candidates["cluster"].isin(selected_clusters)].copy()
+        # 4. Sélection par Machine Learning : on retient la moitié des clusters les plus pertinents
+        cluster_scores = self._cluster_profiles.dot(preferences)
+        top_k_clusters = max(1, len(cluster_scores) // 2)
+        best_clusters = cluster_scores.nlargest(top_k_clusters).index
+        candidates = candidates[candidates["cluster"].isin(best_clusters)].copy()
         if candidates.empty:
-            raise ValueError("No station matches the requested preferences")
+            raise ValueError("Aucune gare trouvée dans les clusters correspondants.")
 
-        # Score touristique normalisé pour chaque catégorie choisie.
+        # 5. Calcul du score touristique dans le rayon choisi par l'utilisateur
         category_scores = pd.DataFrame(index=candidates.index)
         for category, prefix in CATEGORY_COLUMNS.items():
-            weighted_column = (
-                f"{prefix}_website_weighted_count_{criteria.radius_km}km"
+            col = self._get_feature_column(self._stations, prefix, criteria.radius_km)
+            if col not in candidates.columns:
+                raise ValueError(
+                    f"Colonne '{col}' absente : relancer d'abord station_features.py."
+                )
+            values = np.log1p(pd.to_numeric(candidates[col], errors="coerce").fillna(0).clip(lower=0))
+            max_val = (
+                np.log1p(pd.to_numeric(self._stations[col], errors="coerce").fillna(0).clip(lower=0)).max()
+                or 1.0
             )
-            column = (
-                weighted_column
-                if criteria.favor_poi_with_website
-                and weighted_column in self._stations
-                else f"{prefix}_count_{criteria.radius_km}km"
-            )
-            values = np.log1p(candidates[column].fillna(0))
-            maximum = np.log1p(self._stations[column].fillna(0)).max()
-            category_scores[category] = values / (maximum or 1)
+            category_scores[category] = values / max_val
 
-        tourism_score = category_scores.dot(preference_vector)
-        # La fréquentation peut compléter les préférences sans les remplacer.
-        popularity_values = np.log1p(candidates["visitors"].fillna(0).clip(lower=0))
-        popularity_score = popularity_values / (
-            np.log1p(self._stations["visitors"].fillna(0).clip(lower=0)).max() or 1
+        tourism_score = category_scores.dot(preferences)
+
+        # Combinaison avec le facteur interne de fréquentation
+        pop_values = np.log1p(
+            pd.to_numeric(candidates["visitors"], errors="coerce").fillna(0).clip(lower=0)
         )
+        pop_max = (
+            np.log1p(pd.to_numeric(self._stations["visitors"], errors="coerce").fillna(0).clip(lower=0)).max()
+            or 1.0
+        )
+        popularity_score = pop_values / pop_max
+
         candidates["recommendation_score"] = (
-            (1 - criteria.prefer_popular) * tourism_score
-            + criteria.prefer_popular * popularity_score
+            (1 - self.popularity_weight) * tourism_score
+            + self.popularity_weight * popularity_score
         )
         candidates["cluster_score"] = candidates["cluster"].map(cluster_scores)
-        # Cette colonne explique la raison principale de la recommandation.
-        candidates["dominant_category"] = category_scores.mul(
-            preference_vector
-        ).idxmax(axis=1)
+        candidates["dominant_category"] = category_scores.mul(preferences).idxmax(axis=1)
+
         return (
-            candidates.sort_values(
-                ["recommendation_score", "cluster_score"],
-                ascending=False,
-            )
-            .head(criteria.n_results)
+            candidates.sort_values(["recommendation_score", "cluster_score"], ascending=False)
+            .head(n_results)
             .reset_index(drop=True)
         )
-
-
-def get_top_pois_for_station(
-    station_id: str,
-    criteria: RecommendationCriteria,
-    pois: pd.DataFrame,
-    station_poi_index: pd.DataFrame,
-    n_pois: int = 5,
-) -> pd.DataFrame:
-    """Retourne les meilleurs POI correspondant à une gare recommandée."""
-    if n_pois <= 0:
-        raise ValueError("n_pois must be positive")
-
-    # On prend les liens gare-POI déjà calculés, puis on limite au rayon choisi.
-    links = station_poi_index[
-        station_poi_index["station_id"].eq(station_id)
-        & station_poi_index["distance_km"].le(criteria.radius_km)
-    ].copy()
-    if links.empty:
-        return pd.DataFrame()
-
-    # On récupère les informations détaillées du POI (catégorie, site internet).
-    top_pois = links.merge(pois, on="poi_index", how="left")
-    top_pois["preference"] = top_pois["category"].map(
-        {
-            poi_type: getattr(criteria, preference)
-            for poi_type, preference in POI_CATEGORY_BY_TYPE.items()
-        }
-    ).fillna(0)
-
-    # Un site internet augmente légèrement l'attractivité du POI.
-    top_pois["attractivity_score"] = (
-        top_pois["preference"] * 10
-        + top_pois["has_website"].fillna(False).astype(float) * 3
-        - top_pois["distance_km"] / (criteria.radius_km or 1)
-    )
-    return (
-        top_pois.sort_values(
-            ["attractivity_score", "distance_km"],
-            ascending=[False, True],
-        )
-        .head(n_pois)
-        .reset_index(drop=True)
-    )
 
 
 def get_top_pois_for_recommendations(
@@ -335,53 +389,85 @@ def get_top_pois_for_recommendations(
     pois: pd.DataFrame,
     station_poi_index: pd.DataFrame,
     n_pois: int = 5,
+    favor_poi_with_website: bool = True,
 ) -> pd.DataFrame:
-    """Ajoute les cinq meilleurs POI liés à chaque gare recommandée."""
-    if "station_id" not in recommendations:
-        raise ValueError("recommendations must contain station_id")
+    """Retourne les meilleurs POI autour de chaque gare recommandée."""
+    if n_pois <= 0:
+        raise ValueError("n_pois doit être strictement positif.")
+    if "station_id" not in recommendations.columns:
+        raise ValueError("recommendations doit contenir la colonne 'station_id'.")
 
-    station_results = []
-    for _, recommendation in recommendations.iterrows():
-        top_pois = get_top_pois_for_station(
-            str(recommendation["station_id"]),
-            criteria,
-            pois,
-            station_poi_index,
-            n_pois,
-        )
-        if top_pois.empty:
+    prefs = criteria.normalized_preferences()
+    website_bonus = 3.0 if favor_poi_with_website else 0.0
+    results = []
+
+    for _, station in recommendations.iterrows():
+        # Filtrage des liens pré-calculés dans le rayon choisi
+        links = station_poi_index[
+            station_poi_index["station_id"].eq(station["station_id"])
+            & station_poi_index["distance_km"].le(criteria.radius_km)
+        ]
+        if links.empty:
             continue
-        top_pois.insert(0, "station_name", recommendation["name"])
-        station_results.append(top_pois)
 
-    if not station_results:
-        return pd.DataFrame()
-    return pd.concat(station_results, ignore_index=True)
+        top_pois = links.merge(pois, on="poi_index", how="left")
+        top_pois["preference"] = (
+            top_pois["category"].map(POI_CATEGORY_BY_TYPE).map(prefs).fillna(0)
+        )
+        # Score d'attractivité : préférence utilisateur + bonus site web - éloignement
+        top_pois["attractivity_score"] = (
+            top_pois["preference"] * 10
+            + top_pois["has_website"].fillna(False).astype(float) * website_bonus
+            - top_pois["distance_km"] / (criteria.radius_km or 1)
+        )
+
+        best_for_station = (
+            top_pois.sort_values(["attractivity_score", "distance_km"], ascending=[False, True])
+            .head(n_pois)
+            .reset_index(drop=True)
+        )
+        best_for_station.insert(0, "station_name", station["name"])
+        results.append(best_for_station)
+
+    return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
 
 
 def main() -> None:
-    """Exemple d'utilisation du moteur de recommandation."""
-    stations = pd.read_csv(ROOT / "data" / "station_features.csv")
+    """Exemple d'exécution du moteur de recommandation."""
+    stations = pd.read_csv(
+        ROOT / "data" / "station_features.csv",
+        dtype={"station_id": "string", "departement": "string"},
+    )
+
+    # Critères utilisateur simplifiés
     criteria = RecommendationCriteria(
         culture=0.1,
         nature=0.8,
         events=0.2,
         attractions=0.2,
         radius_km=10,
-        departure_station_name="Nancy",
-        max_distance_km=300,
-        n_results=5,
-        exclude_ile_de_france=True,
+        departure_station="Nancy",
+        max_travel_minutes=60,
+        travel_date="20261221",
+        departure_time="07:00",
+        exclude_paris=True,
     )
-    recommender = TourismRecommender().fit(stations)
-    recommendations = recommender.recommend(criteria)
-    print(recommendations[["name", "recommendation_score", "dominant_category"]])
 
-    from scripts.research.station_features import load_pois
+    # Paramètres internes du moteur (fréquentation minimale, poids popularité, sites web)
+    recommender = TourismRecommender(
+        n_clusters=6,
+        min_visitors=10_000,
+        popularity_weight=0.25,
+        favor_poi_with_website=True,
+    ).fit(stations)
+
+    recommendations = recommender.recommend(criteria, n_results=5)
+    print(recommendations[["name", "recommendation_score", "dominant_category"]])
 
     pois = load_pois()
     station_poi_index = pd.read_csv(
-        ROOT / "data" / "station_poi_index.csv"
+        ROOT / "data" / "station_poi_index.csv",
+        dtype={"station_id": "string"},
     )
     top_pois = get_top_pois_for_recommendations(
         recommendations,
@@ -389,12 +475,10 @@ def main() -> None:
         pois,
         station_poi_index,
         n_pois=5,
+        favor_poi_with_website=recommender.favor_poi_with_website,
     )
     print(
-        top_pois[
-            ["station_name", "Nom", "category", "distance_km",
-             "attractivity_score"]
-        ]
+        top_pois[["station_name", "Nom", "category", "distance_km", "attractivity_score"]]
     )
 
 

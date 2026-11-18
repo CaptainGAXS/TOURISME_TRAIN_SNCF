@@ -45,10 +45,9 @@ def load_stations(path, dept_to_region):
 
 def load_ridership(path):
     freq = pd.read_csv(path, sep=";", dtype=str)
-    f = freq[["Code UIC", "Direction Régionale Gares", "Total Voyageurs 2025"]].rename(
+    f = freq[["Code UIC", "Total Voyageurs 2025"]].rename(
         columns={
             "Code UIC": "uic",
-            "Direction Régionale Gares": "drg",
             "Total Voyageurs 2025": "visitors",
         }
     )
@@ -76,13 +75,10 @@ def attach_riderships(st_uic, f):
     # Back to one row per station (sum the visitors of all its UIC codes)
     return merged.groupby("station_id", as_index=False).agg(
         name=("name", "first"),
-        uic=("uic", lambda s: ";".join(s.dropna())),
         lat=("lat", "first"),
         lon=("lon", "first"),
-        insee=("insee", "first"),
         departement=("departement", "first"),
         region=("region", "first"),
-        drg=("drg", "first"),
         visitors=("visitors", lambda s: s.sum(min_count=1)),
     )
 
