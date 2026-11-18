@@ -17,6 +17,12 @@ CATEGORY_COLUMNS = {
     "attractions": "attraction",
 }
 RADIUSES_KM = (20, 15, 10, 5, 3, 1)
+POI_CATEGORY_BY_TYPE = {
+    "hpoi": "culture",
+    "npoi": "nature",
+    "epoi": "events",
+    "attraction": "attractions",
+}
 # Départements composant la région Île-de-France.
 ILE_DE_FRANCE_DEPARTMENTS = frozenset(
     {"75", "77", "78", "91", "92", "93", "94", "95"}
@@ -39,6 +45,7 @@ class RecommendationCriteria:
     departure_station_name: str | None = None
     max_distance_km: float | None = None
     exclude_ile_de_france: bool = False
+    favor_poi_with_website: bool = True
 
     def preferences(self) -> dict[str, float]:
         """Valide et normalise les préférences touristiques."""
@@ -90,7 +97,11 @@ class TourismRecommender:
         """Entraîne K-Means sur les features touristiques des gares."""
         # Les compteurs à 10 km décrivent le profil touristique de chaque gare.
         category_columns = {
-            category: f"{prefix}_count_10km"
+            category: (
+                f"{prefix}_website_weighted_count_10km"
+                if f"{prefix}_website_weighted_count_10km" in stations
+                else f"{prefix}_count_10km"
+            )
             for category, prefix in CATEGORY_COLUMNS.items()
         }
         missing = set(category_columns.values()) - set(stations.columns)
@@ -236,7 +247,15 @@ class TourismRecommender:
         # Score touristique normalisé pour chaque catégorie choisie.
         category_scores = pd.DataFrame(index=candidates.index)
         for category, prefix in CATEGORY_COLUMNS.items():
-            column = f"{prefix}_count_{criteria.radius_km}km"
+            weighted_column = (
+                f"{prefix}_website_weighted_count_{criteria.radius_km}km"
+            )
+            column = (
+                weighted_column
+                if criteria.favor_poi_with_website
+                and weighted_column in self._stations
+                else f"{prefix}_count_{criteria.radius_km}km"
+            )
             values = np.log1p(candidates[column].fillna(0))
             maximum = np.log1p(self._stations[column].fillna(0)).max()
             category_scores[category] = values / (maximum or 1)
@@ -266,24 +285,117 @@ class TourismRecommender:
         )
 
 
+def get_top_pois_for_station(
+    station_id: str,
+    criteria: RecommendationCriteria,
+    pois: pd.DataFrame,
+    station_poi_index: pd.DataFrame,
+    n_pois: int = 5,
+) -> pd.DataFrame:
+    """Retourne les meilleurs POI correspondant à une gare recommandée."""
+    if n_pois <= 0:
+        raise ValueError("n_pois must be positive")
+
+    # On prend les liens gare-POI déjà calculés, puis on limite au rayon choisi.
+    links = station_poi_index[
+        station_poi_index["station_id"].eq(station_id)
+        & station_poi_index["distance_km"].le(criteria.radius_km)
+    ].copy()
+    if links.empty:
+        return pd.DataFrame()
+
+    # On récupère les informations détaillées du POI (catégorie, site internet).
+    top_pois = links.merge(pois, on="poi_index", how="left")
+    top_pois["preference"] = top_pois["category"].map(
+        {
+            poi_type: getattr(criteria, preference)
+            for poi_type, preference in POI_CATEGORY_BY_TYPE.items()
+        }
+    ).fillna(0)
+
+    # Un site internet augmente légèrement l'attractivité du POI.
+    top_pois["attractivity_score"] = (
+        top_pois["preference"] * 10
+        + top_pois["has_website"].fillna(False).astype(float) * 3
+        - top_pois["distance_km"] / (criteria.radius_km or 1)
+    )
+    return (
+        top_pois.sort_values(
+            ["attractivity_score", "distance_km"],
+            ascending=[False, True],
+        )
+        .head(n_pois)
+        .reset_index(drop=True)
+    )
+
+
+def get_top_pois_for_recommendations(
+    recommendations: pd.DataFrame,
+    criteria: RecommendationCriteria,
+    pois: pd.DataFrame,
+    station_poi_index: pd.DataFrame,
+    n_pois: int = 5,
+) -> pd.DataFrame:
+    """Ajoute les cinq meilleurs POI liés à chaque gare recommandée."""
+    if "station_id" not in recommendations:
+        raise ValueError("recommendations must contain station_id")
+
+    station_results = []
+    for _, recommendation in recommendations.iterrows():
+        top_pois = get_top_pois_for_station(
+            str(recommendation["station_id"]),
+            criteria,
+            pois,
+            station_poi_index,
+            n_pois,
+        )
+        if top_pois.empty:
+            continue
+        top_pois.insert(0, "station_name", recommendation["name"])
+        station_results.append(top_pois)
+
+    if not station_results:
+        return pd.DataFrame()
+    return pd.concat(station_results, ignore_index=True)
+
+
 def main() -> None:
     """Exemple d'utilisation du moteur de recommandation."""
     stations = pd.read_csv(ROOT / "data" / "station_features.csv")
-    recommender = TourismRecommender().fit(stations)
-    recommendations = recommender.recommend(
-        RecommendationCriteria(
-            culture=0.1,
-            nature=0.8,
-            events=0.2,
-            attractions=0.2,
-            radius_km=10,
-            departure_station_name="Nancy",
-            max_distance_km=300,
-            n_results=5,
-            exclude_ile_de_france=True,
-        )
+    criteria = RecommendationCriteria(
+        culture=0.1,
+        nature=0.8,
+        events=0.2,
+        attractions=0.2,
+        radius_km=10,
+        departure_station_name="Nancy",
+        max_distance_km=300,
+        n_results=5,
+        exclude_ile_de_france=True,
     )
+    recommender = TourismRecommender().fit(stations)
+    recommendations = recommender.recommend(criteria)
     print(recommendations[["name", "recommendation_score", "dominant_category"]])
+
+    from scripts.research.station_features import load_pois
+
+    pois = load_pois()
+    station_poi_index = pd.read_csv(
+        ROOT / "data" / "station_poi_index.csv"
+    )
+    top_pois = get_top_pois_for_recommendations(
+        recommendations,
+        criteria,
+        pois,
+        station_poi_index,
+        n_pois=5,
+    )
+    print(
+        top_pois[
+            ["station_name", "Nom", "category", "distance_km",
+             "attractivity_score"]
+        ]
+    )
 
 
 if __name__ == "__main__":

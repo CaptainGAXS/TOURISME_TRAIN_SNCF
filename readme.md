@@ -132,6 +132,7 @@ recommendations = recommender.recommend(
         departure_station_name="Nancy",
         max_distance_km=10,
         exclude_ile_de_france=True,
+        favor_poi_with_website=True,
         n_results=5,
     )
 )
@@ -147,6 +148,32 @@ fréquentation de la gare. `max_distance_km` limite la recherche autour de la
 gare de départ. Pour rechercher dans toute la France, renseigner la gare de
 départ sans fournir `max_distance_km`. `exclude_ile_de_france=True` retire les
 destinations des départements 75, 77, 78, 91, 92, 93, 94 et 95.
+`favor_poi_with_website=True` utilise des compteurs pondérés dans lesquels un
+POI possédant une adresse de site internet compte 3 fois plus qu'un POI sans
+site. Cette option peut être désactivée avec `False`.
+
+Pour récupérer les cinq POI principaux associés à chaque gare recommandée :
+
+```python
+from scripts.research.recommender import get_top_pois_for_recommendations
+from scripts.research.station_features import load_pois
+
+pois = load_pois()
+station_poi_index = pd.read_csv("data/station_poi_index.csv")
+
+top_pois = get_top_pois_for_recommendations(
+    recommendations,
+    criteria,
+    pois,
+    station_poi_index,
+    n_pois=5,
+)
+
+print(top_pois[
+    ["station_name", "Nom", "category", "distance_km",
+     "attractivity_score"]
+])
+```
 
 ## Structure principale
 

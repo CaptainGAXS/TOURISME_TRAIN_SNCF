@@ -20,7 +20,7 @@ def map_layer(mappath):
     )
     return layer
 
-def render_map(mappath, layers = []):
+def render_map(display_area, mappath, layers = []):
     maplayer = map_layer(mappath)
 
     view_state = pdk.ViewState(latitude=46.6, longitude=2.2, zoom=4.5)
@@ -38,4 +38,5 @@ def render_map(mappath, layers = []):
     )
 
     deck_html = deck.to_html(as_string=True)
-    components.html(deck_html, height=800)
+    with display_area:
+        components.html(deck_html, height=800)
