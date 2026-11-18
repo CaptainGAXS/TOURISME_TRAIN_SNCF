@@ -15,9 +15,9 @@ POI_FILES = {
     "epoi": ROOT / "data" / "epoi.csv",
     "attraction": ROOT / "data" / "attractions_france.csv",
 }
-RADIUSES_KM = (20, 15, 10, 5, 3, 1)
+RADIUSES_KM = (20, 15, 10, 5, 3, 1)  # les distances en km autour des gares
 EARTH_RADIUS_KM = 6371.0088
-WEBSITE_POI_WEIGHT = 3.0
+WEBSITE_POI_WEIGHT = 3.0  # si un poi a un site web, c'est que c'est un minimum bien
 
 
 def load_pois() -> pd.DataFrame:
@@ -27,6 +27,7 @@ def load_pois() -> pd.DataFrame:
         # On conserve uniquement les colonnes utiles aux calculs de distance.
         poi = pd.read_csv(path)
         poi = poi.rename(columns={"Latitude": "lat", "Longitude": "lon"})
+        # ce qu'on veut afficher pour chaque POI
         required = {"Nom", "Identifiant", "lat", "lon", "Site internet"}
         missing = required - set(poi.columns)
         if missing:
@@ -49,7 +50,7 @@ def load_pois() -> pd.DataFrame:
     pois["Identifiant"] = pois["Identifiant"].astype("string").str.strip()
     pois["Nom"] = pois["Nom"].astype("string").str.strip()
 
-    # Un identifiant non vide est la meilleure clé de dédoublonnage.
+    # Un identifiant non vide est la meilleure clé pour vérifier les doublons.
     identifier = pois["Identifiant"].fillna("")
     duplicate_id = identifier.ne("") & identifier.duplicated(keep="first")
     # Si plusieurs catégories reprennent le même identifiant, le site internet
@@ -94,7 +95,7 @@ def _get_station(
     station_id: str | None,
     station_name: str | None,
 ) -> pd.Series:
-    """Retourne une gare et vérifie que la recherche est non ambiguë."""
+    """Retourne une gare et vérifie que la recherche est unique."""
     if (station_id is None) == (station_name is None):
         raise ValueError("Provide exactly one of station_id or station_name")
 
@@ -125,6 +126,8 @@ def find_nearby_pois(
 
     station = _get_station(stations, station_id, station_name)
     # BallTree avec la métrique haversine attend des coordonnées en radians.
+    # La métrique haversine est une méthode utilisée pour calculer la distance entre deux points sur la surface d'une sphère, 
+    # en utilisant leurs coordonnées géographiques (latitude et longitude).
     station_coordinates = np.radians([[station["lat"], station["lon"]]])
     poi_coordinates = np.radians(pois[["lat", "lon"]].to_numpy())
     tree = BallTree(poi_coordinates, metric="haversine")
@@ -305,6 +308,18 @@ def main() -> None:
     print(f"POIs used: {len(pois)}")
     print(f"Stations enriched: {len(features)}")
     print(f"Saved to {output}")
+    
+    station_poi_index, poi_nearest_station = build_proximity_indexes(stations, pois)
+
+    station_poi_path = ROOT / "data" / "station_poi_index.csv"
+    nearest_station_path = ROOT / "data" / "poi_nearest_station.csv"
+    station_poi_index.to_csv(station_poi_path, index=False)
+    poi_nearest_station.to_csv(nearest_station_path, index=False)
+
+    print(f"Station-POI links: {len(station_poi_index)}")
+    print(f"POIs indexed: {len(poi_nearest_station)}")
+    print(f"Saved to {station_poi_path}")
+    print(f"Saved to {nearest_station_path}")
 
 
 if __name__ == "__main__":

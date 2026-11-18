@@ -6,17 +6,16 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.neighbors import BallTree
 from sklearn.preprocessing import StandardScaler
+from scripts.research.station_features import ROOT, RADIUSES_KM, EARTH_RADIUS_KM
 
 
 # Racine du projet et correspondance entre préférences et fichiers de POI.
-ROOT = Path(__file__).resolve().parent.parent.parent
 CATEGORY_COLUMNS = {
     "culture": "hpoi",
     "nature": "npoi",
     "events": "epoi",
     "attractions": "attraction",
 }
-RADIUSES_KM = (20, 15, 10, 5, 3, 1)
 POI_CATEGORY_BY_TYPE = {
     "hpoi": "culture",
     "npoi": "nature",
@@ -184,7 +183,7 @@ class TourismRecommender:
                 )
 
             departure = departure_matches.iloc[0]
-            # BallTree utilise la distance haversine sur des coordonnées en radians.
+
             station_coordinates = np.radians(
                 self._stations[["lat", "lon"]].to_numpy()
             )
@@ -195,7 +194,7 @@ class TourismRecommender:
             distances, indices = station_tree.query(
                 departure_coordinates, k=len(self._stations)
             )
-            distances_km = distances[0] * 6371.0088
+            distances_km = distances[0] * EARTH_RADIUS_KM
             station_distances = pd.Series(
                 distances_km,
                 index=self._stations.iloc[indices[0]]["station_id"],
