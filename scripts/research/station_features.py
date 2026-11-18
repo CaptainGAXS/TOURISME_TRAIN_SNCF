@@ -17,6 +17,7 @@ POI_FILES = {
 }
 RADIUSES_KM = (20, 15, 10, 5, 3, 1)
 EARTH_RADIUS_KM = 6371.0088
+WEBSITE_POI_WEIGHT = 3.0
 
 
 def load_pois() -> pd.DataFrame:
@@ -26,15 +27,21 @@ def load_pois() -> pd.DataFrame:
         # On conserve uniquement les colonnes utiles aux calculs de distance.
         poi = pd.read_csv(path)
         poi = poi.rename(columns={"Latitude": "lat", "Longitude": "lon"})
-        required = {"Nom", "Identifiant", "lat", "lon"}
+        required = {"Nom", "Identifiant", "lat", "lon", "Site internet"}
         missing = required - set(poi.columns)
         if missing:
             raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
-        poi = poi[["Nom", "Identifiant", "lat", "lon"]].copy()
+        poi = poi[
+            ["Nom", "Identifiant", "lat", "lon", "Site internet"]
+        ].copy()
         poi["lat"] = pd.to_numeric(poi["lat"], errors="coerce")
         poi["lon"] = pd.to_numeric(poi["lon"], errors="coerce")
         poi = poi.dropna(subset=["lat", "lon"])
         poi["category"] = category
+        # Une URL non vide indique que le POI possède une fiche/site accessible.
+        poi["has_website"] = (
+            poi["Site internet"].astype("string").str.strip().fillna("").ne("")
+        )
         frames.append(poi)
 
     # Les fichiers sont réunis pour pouvoir supprimer les doublons communs.
@@ -45,6 +52,11 @@ def load_pois() -> pd.DataFrame:
     # Un identifiant non vide est la meilleure clé de dédoublonnage.
     identifier = pois["Identifiant"].fillna("")
     duplicate_id = identifier.ne("") & identifier.duplicated(keep="first")
+    # Si plusieurs catégories reprennent le même identifiant, le site internet
+    # doit être conservé dès qu'au moins une des lignes en possède un.
+    if identifier.ne("").any():
+        website_by_id = pois.groupby(identifier, dropna=False)["has_website"].max()
+        pois["has_website"] = identifier.map(website_by_id).fillna(False)
 
     # Pour les lignes sans identifiant, on utilise le nom et les coordonnées.
     coordinate_key = (
@@ -211,17 +223,36 @@ def _query_features(
     coordinates: np.ndarray,
     prefix: str,
     radiuses_km: tuple[int, ...],
+    poi_weights: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Compte les POI dans chaque rayon et trouve le plus proche."""
     features = {}
     for radius_km in radiuses_km:
         # Le rayon est converti en radians pour BallTree.
-        counts = tree.query_radius(
+        matches = tree.query_radius(
             coordinates,
             r=radius_km / EARTH_RADIUS_KM,
-            count_only=True,
+            return_distance=False,
+        )
+        counts = np.fromiter(
+            (len(poi_indices) for poi_indices in matches),
+            dtype=int,
+            count=len(matches),
         )
         features[f"{prefix}_count_{radius_km}km"] = counts
+
+        # Un POI avec site internet reçoit un poids supérieur aux autres.
+        if poi_weights is not None:
+            weighted_counts = np.array(
+                [
+                    poi_weights[poi_indices].sum()
+                    for poi_indices in matches
+                ],
+                dtype=float,
+            )
+            features[f"{prefix}_website_weighted_count_{radius_km}km"] = (
+                weighted_counts
+            )
 
     # On ajoute aussi la distance vers le POI le plus proche.
     nearest, _ = tree.query(coordinates, k=1)
@@ -245,9 +276,19 @@ def compute_station_features(
             continue
         poi_coordinates = np.radians(category_pois[["lat", "lon"]].to_numpy())
         tree = BallTree(poi_coordinates, metric="haversine")
+        # Poids 1 sans site, 3 avec site internet.
+        poi_weights = np.where(
+            category_pois["has_website"].fillna(False).to_numpy(),
+            WEBSITE_POI_WEIGHT,
+            1.0,
+        )
         prefix = "poi" if category == "all" else category
         for feature_name, values in _query_features(
-            tree, station_coordinates, prefix, radiuses_km
+            tree,
+            station_coordinates,
+            prefix,
+            radiuses_km,
+            poi_weights,
         ).items():
             features[feature_name] = values
 
