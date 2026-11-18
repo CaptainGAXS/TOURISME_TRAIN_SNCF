@@ -6,8 +6,14 @@ ROOT = Path(__file__).resolve().parents[2]
 RAW = ROOT / "data" / "raw"
 OUT = ROOT / "data"
 
+def load_dept_to_region(dep_path, reg_path):
+    """Département code -> region name, from INSEE's Code officiel géographique (COG)."""
+    dep = pd.read_csv(dep_path, dtype=str)[["DEP", "REG"]]
+    reg = pd.read_csv(reg_path, dtype=str)[["REG", "LIBELLE"]]
+    return dep.merge(reg, on="REG").set_index("DEP")["LIBELLE"]
 
-def load_stations(path):
+
+def load_stations(path, dept_to_region):
     gares = pd.read_csv(path, sep=";", dtype=str)
     st = gares[
         ["Id_Gare", "Nom_Gare", "Code_UIC", "Position géographique", "Code commune"]
@@ -24,14 +30,27 @@ def load_stations(path):
     if len(bad):
         print(f"[warn] {len(bad)} stations with missing/invalid coordinates")
 
+    # Département = first 2 characters of the INSEE code ("75113" -> "75", "2A004" -> "2A"),
+    # or 3 characters overseas ("97411" -> "974")
+    st["departement"] = st["insee"].str[:2].where(
+        ~st["insee"].str.startswith("97"), st["insee"].str[:3]
+    )
+    st["region"] = st["departement"].map(dept_to_region)
+    if st["region"].isna().any():
+        print(f"[warn] {st['region'].isna().sum()} stations without a region")
+
     # Some stations have several UIC codes ("87547026;87547000") -> one row per code
     return st.assign(uic=st["uic"].str.split(r"[;,| ]+")).explode("uic")
 
 
 def load_ridership(path):
     freq = pd.read_csv(path, sep=";", dtype=str)
-    f = freq[["Code UIC", "Total Voyageurs 2025"]].rename(
-        columns={"Code UIC": "uic", "Total Voyageurs 2025": "visitors"}
+    f = freq[["Code UIC", "Direction Régionale Gares", "Total Voyageurs 2025"]].rename(
+        columns={
+            "Code UIC": "uic",
+            "Direction Régionale Gares": "drg",
+            "Total Voyageurs 2025": "visitors",
+        }
     )
     f["visitors"] = pd.to_numeric(f["visitors"], errors="coerce")
     return f
@@ -61,12 +80,18 @@ def attach_riderships(st_uic, f):
         lat=("lat", "first"),
         lon=("lon", "first"),
         insee=("insee", "first"),
+        departement=("departement", "first"),
+        region=("region", "first"),
+        drg=("drg", "first"),
         visitors=("visitors", lambda s: s.sum(min_count=1)),
     )
 
 
 def main():
-    st_uic = load_stations(RAW / "gares.csv")
+    dept_to_region = load_dept_to_region(
+        RAW / "v_departement_2026.csv", RAW / "v_region_2026.csv"
+    )
+    st_uic = load_stations(RAW / "gares.csv", dept_to_region)
     f = load_ridership(RAW / "frequentation_latest.csv")
     stations = attach_riderships(st_uic, f)
 
