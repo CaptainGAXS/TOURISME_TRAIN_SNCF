@@ -2,6 +2,9 @@
 from itinerary_ui import itinerary_sidebar
 layers = itinerary_sidebar()  # pydeck layers of the chosen journey ([] if none)
 deck = pdk.Deck(layers=[other_layer] + layers, ...)
+
+network, start_seconds = date_time_inputs()
+layers = journey_panel(network, origin_id, destination_id, start_seconds)
 """
 
 from datetime import date, time, timedelta
@@ -25,34 +28,23 @@ def get_network(day):
     return load_network(day)
 
 
-def itinerary_sidebar():
-    st.sidebar.header("Itinéraire")
-
-    # ---- inputs
+def date_time_inputs():
+    """Date + earliest departure time. Returns (network of that day, start time in seconds)."""
     day = st.sidebar.date_input(
         "Date", date.today() + timedelta(days=1), key="itin_date"
     )
     start = st.sidebar.time_input("Departure after", time(7, 0), key="itin_time")
     network = get_network(day.strftime("%Y%m%d"))
+    return network, start.hour * 3600 + start.minute * 60
+
+
+def journey_panel(network, origin, destination, start_seconds):
+    """Journeys between two GTFS station_ids: choose one, show details + CO2.
+    Returns the pydeck layers of the chosen journey ([] if none)."""
     stations, connections, trips, footpaths = network
 
-    name_to_id = {s["name"]: sid for sid, s in stations.items()}
-    names = sorted(name_to_id)
-    origin = st.sidebar.selectbox(
-        "From", names, index=names.index("Nancy"), key="itin_from"
-    )
-    destination = st.sidebar.selectbox(
-        "To", names, index=names.index("Paris Est"), key="itin_to"
-    )
-
     # ---- search
-    journeys = plan(
-        network,
-        name_to_id[origin],
-        name_to_id[destination],
-        start.hour * 3600 + start.minute * 60,
-        n=5,
-    )
+    journeys = plan(network, origin, destination, start_seconds, n=5)
     if not journeys:
         st.sidebar.warning("No journey found.")
         return []
@@ -70,14 +62,16 @@ def itinerary_sidebar():
         key="itin_choice",
     )
     legs = journeys[choice]
-    lines = describe(legs, stations, trips).splitlines()  # line 0 = summary, then 1 line per leg
+    lines = describe(
+        legs, stations, trips
+    ).splitlines()  # line 0 = summary, then 1 line per leg
     for i, leg in enumerate(legs):
         if leg["mode"] == "train":
             lines[i + 1] += "  " + co2_text(leg_co2(leg, stations, trips))
 
     # ---- whole journey vs. car
     train_kg = journey_co2(legs, stations, trips)
-    car_kg = car_co2(name_to_id[origin], name_to_id[destination], stations)
+    car_kg = car_co2(origin, destination, stations)
     lines.append("")
     lines.append(f"Total (train): {co2_text(train_kg)}")
     car_line = f"Car (petrol, 2.2 pers.): {co2_text(car_kg)}"
@@ -88,3 +82,21 @@ def itinerary_sidebar():
     st.sidebar.caption("Estimated CO2e per traveller (SNCF factors per km x distance).")
 
     return journey_layers(legs, stations, trips)
+
+
+def itinerary_sidebar():
+    st.sidebar.header("Itinéraire")
+    network, start_seconds = date_time_inputs()
+    stations = network[0]
+
+    name_to_id = {s["name"]: sid for sid, s in stations.items()}
+    names = sorted(name_to_id)
+    origin = st.sidebar.selectbox(
+        "From", names, index=names.index("Nancy"), key="itin_from"
+    )
+    destination = st.sidebar.selectbox(
+        "To", names, index=names.index("Paris Est"), key="itin_to"
+    )
+    return journey_panel(
+        network, name_to_id[origin], name_to_id[destination], start_seconds
+    )

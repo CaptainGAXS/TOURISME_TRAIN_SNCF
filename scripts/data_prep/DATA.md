@@ -24,6 +24,12 @@ To update the SNCF timetable (GTFS) used by the journey planner, run the followi
 curl -L -o data/gtfs_sncf.zip "https://www.data.gouv.fr/api/1/datasets/r/9ae758ec-cd7a-40cd-a890-bb3963224942"
 ```
 
+To rebuild `data/paris_transfers.csv` (metro/RER/tram time between the SNCF stations of the Paris area, computed from the Île-de-France Mobilités timetable), run the following command. The IDFM file is about 113 MB and valid about one month; change `DATE` in the script to a weekday inside its validity.
+```
+curl -L -o data/raw/idfm_gtfs.zip "https://www.data.gouv.fr/api/1/datasets/r/413988ed-d340-467b-8be2-7b999fcd207a"
+python scripts/data_prep/build_paris_transfers.py
+```
+
 ## Shape
 
 2,792 rows, one per station (`station_id` is unique).

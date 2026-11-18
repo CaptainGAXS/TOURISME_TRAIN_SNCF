@@ -17,6 +17,7 @@ COLORS = {
     "Car TER": [240, 150, 0],
     "Car à réservation": [240, 150, 0],
     "walk": [130, 130, 130],
+    "metro/RER": [130, 130, 130],  # transfer between Paris stations (data/paris_transfers.csv)
 }
 OTHER_COLOR = [90, 60, 160]  # ICE, Lyria, ...
 
@@ -30,8 +31,8 @@ def journey_layers(legs, stations, trips):
 
     for leg in legs:
         ids = leg_stations(leg, trips)
-        if leg["mode"] == "walk":
-            kind, title = "walk", "Walk"
+        if leg["mode"] != "train":  # "walk" or "metro/RER"
+            kind, title = leg["mode"], leg["mode"].capitalize()
         else:
             kind = trips[leg["trip"]]["kind"]
             title = f"{kind} {trips[leg['trip']]['number']}"
