@@ -1,4 +1,5 @@
-"""Load the SNCF GTFS timetable for one day and turn it into a simple network
+"""
+Load the SNCF GTFS timetable for one day and turn it into a simple network
 
 Data: data/gtfs_sncf.zip, read directly from the zip (no need to unzip).
     To update it (feed valid until 2027-04-30), download:
@@ -9,7 +10,10 @@ Output:
     connections list of {"trip", "from", "to", "dep", "arr", ...} sorted by departure time.
                 One connection = a train going from one stop to the next one
     trips       {trip_id: {"kind", "number", "stops": [station_id, ...]}}
-    footpaths   {station_id: [(other_station_id, walk_seconds), ...]}
+    footpaths   {station_id: [(other_station_id, seconds, mode), ...]}
+                mode "walk": stations closer than MAX_WALK_METERS
+                mode "metro/RER": between the SNCF stations of the Paris area, from
+                data/paris_transfers.csv (built by scripts/data_prep/build_paris_transfers.py)
 """
 
 import math
@@ -20,6 +24,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 GTFS_ZIP = ROOT / "data" / "gtfs_sncf.zip"
+PARIS_TRANSFERS_CSV = ROOT / "data" / "paris_transfers.csv"
 
 MAX_WALK_METERS = 1000  # walk between two stations if they are closer than this
 WALK_SPEED = 4.5 / 3.6  # m/s (4.5 km/h)
@@ -36,6 +41,16 @@ def read_gtfs(name):
     """Read one file of the GTFS (e.g. 'stops.txt') directly from the zip."""
     with zipfile.ZipFile(GTFS_ZIP) as z:
         return pd.read_csv(z.open(name), dtype=str)
+
+
+def uic_to_station_id(uic_text, stations):
+    """UIC code(s) from data/stations.csv -> GTFS station_id, or None if not in the GTFS.
+    '87547026;87547000' -> 'StopArea:OCE87547000' (first code found in the GTFS)."""
+    for code in str(uic_text).split(";"):
+        station_id = "StopArea:OCE" + code.strip()
+        if station_id in stations:
+            return station_id
+    return None
 
 
 def distance_m(lat1, lon1, lat2, lon2):
@@ -65,7 +80,7 @@ def load_stations():
     return stations, platform_to_station
 
 
-# Output: dict of station_id -> list of (other_station_id, walk_seconds)
+# Output: dict of station_id -> list of (other_station_id, seconds, mode)
 def build_footpaths(stations):
     """For each station, the stations reachable on foot and how long it takes."""
     footpaths = {s: [] for s in stations}
@@ -78,8 +93,15 @@ def build_footpaths(stations):
             d = distance_m(sa["lat"], sa["lon"], sb["lat"], sb["lon"])
             if d <= MAX_WALK_METERS:
                 seconds = int(d * DETOUR / WALK_SPEED)
-                footpaths[a].append((b, seconds))
-                footpaths[b].append((a, seconds))
+                footpaths[a].append((b, seconds, "walk"))
+                footpaths[b].append((a, seconds, "walk"))
+
+    # metro/RER between the SNCF stations of the Paris area (one row per direction)
+    transfers = pd.read_csv(PARIS_TRANSFERS_CSV, dtype={"from_uic": str, "to_uic": str})
+    for row in transfers.itertuples():
+        a, b = "StopArea:OCE" + row.from_uic, "StopArea:OCE" + row.to_uic
+        if a in stations and b in stations:
+            footpaths[a].append((b, row.minutes * 60, "metro/RER"))
     return footpaths
 
 

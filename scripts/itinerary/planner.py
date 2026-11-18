@@ -32,18 +32,30 @@ def find_station(
     return None  # not found
 
 
-def earliest_arrival(connections, footpaths, origin, destination, start_time):
-    """Returns the journey as a list of legs, or None if no journey is found."""
+def scan(
+    connections,
+    footpaths,
+    origin,
+    start_time,
+    destination=None,
+    transfer_seconds=TRANSFER_SECONDS,
+):
+    """Connection Scan: earliest arrival time at every station reachable from origin.
+
+    Returns (arrival, came_from). With a destination, stops as soon as nothing can
+    arrive there earlier; with destination=None, scans the whole day.
+    footpaths: {station: [(other_station, seconds, mode), ...]}, mode = "walk", "metro/RER"...
+    """
     arrival = {origin: start_time}  # station -> earliest arrival time
     came_from = {}  # station -> the leg that brought us there the fastest
     boarded_at = {}  # trip -> the connection where we got on that train
 
     def walk_from(station):
-        for other, seconds in footpaths[station]:
+        for other, seconds, mode in footpaths.get(station, []):
             if arrival[station] + seconds < arrival.get(other, float("inf")):
                 arrival[other] = arrival[station] + seconds
                 came_from[other] = {
-                    "mode": "walk",
+                    "mode": mode,
                     "from": station,
                     "to": other,
                     "dep": arrival[station],
@@ -65,7 +77,7 @@ def earliest_arrival(connections, footpaths, origin, destination, start_time):
             if c["from"] not in arrival or not c["can_board"]:
                 continue
             ready = arrival[c["from"]] + (
-                0 if c["from"] == origin else TRANSFER_SECONDS
+                0 if c["from"] == origin else transfer_seconds
             )
             if ready > c["dep"]:
                 continue  # cannot catch this train
@@ -85,6 +97,12 @@ def earliest_arrival(connections, footpaths, origin, destination, start_time):
             }
             walk_from(c["to"])
 
+    return arrival, came_from
+
+
+def earliest_arrival(connections, footpaths, origin, destination, start_time):
+    """Returns the journey as a list of legs, or None if no journey is found."""
+    _, came_from = scan(connections, footpaths, origin, start_time, destination)
     if destination not in came_from:
         return None
 
@@ -116,9 +134,16 @@ def plan(network, origin, destination, start_time, n=3):
     return journeys
 
 
+def travel_times(network, origin, start_time):
+    """{station_id: seconds from start_time until arrival} for every reachable station"""
+    stations, connections, trips, footpaths = network
+    arrival, _ = scan(connections, footpaths, origin, start_time)
+    return {station: t - start_time for station, t in arrival.items()}
+
+
 def leg_stations(leg, trips):
-    """Stations passed by a leg, in order (for walking: just start and end)."""
-    if leg["mode"] == "walk":
+    """Stations passed by a leg, in order (for walking / metro: just start and end)."""
+    if leg["mode"] != "train":
         return [leg["from"], leg["to"]]
     stops = trips[leg["trip"]]["stops"]
     start = stops.index(leg["from"])
@@ -145,8 +170,8 @@ def describe(legs, stations, trips):  # legs -> text lines (display)
     ]
     for leg in legs:
         start, end = stations[leg["from"]]["name"], stations[leg["to"]]["name"]
-        if leg["mode"] == "walk":
-            what = f"walk {(leg['arr'] - leg['dep']) // 60} min"
+        if leg["mode"] != "train":  # "walk" or "metro/RER"
+            what = f"{leg['mode']} {(leg['arr'] - leg['dep']) // 60} min"
         else:
             what = f"{trips[leg['trip']]['kind']} {trips[leg['trip']]['number']}"
         lines.append(
