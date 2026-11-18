@@ -31,14 +31,12 @@ NATURE_POI = [
     "Parc et jardin",
     "Itinéraire pédestre",
     "Itinéraire cyclable",
-    "Randonnée",
     "Via ferrata",
     "Vélorail",
     "Parc naturel",
     "Grotte",
     "Cascade",
     "Canyon",
-    "Cirque naturel",
     "Volcan",
 ]
 

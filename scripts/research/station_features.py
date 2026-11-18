@@ -5,85 +5,80 @@ import pandas as pd
 from sklearn.neighbors import BallTree
 
 
-# La racine du projet est trois niveaux au-dessus de ce fichier.
+# Racine du projet (trois niveaux au-dessus de ce script)
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Chaque fichier correspond à une catégorie de POI.
+# Fichiers sources des points d'intérêt (POI) par catégorie
 POI_FILES = {
-    "hpoi": ROOT / "data" / "hpoi.csv",
-    "npoi": ROOT / "data" / "npoi.csv",
-    "epoi": ROOT / "data" / "epoi.csv",
-    "attraction": ROOT / "data" / "attractions_france.csv",
+    "hpoi": ROOT / "data" / "hpoi.csv",               # Culture / patrimoine
+    "npoi": ROOT / "data" / "npoi.csv",               # Nature
+    "epoi": ROOT / "data" / "epoi.csv",               # Événements
+    "attraction": ROOT / "data" / "attractions_france.csv",  # Attractions
 }
-RADIUSES_KM = (20, 15, 10, 5, 3, 1)  # les distances en km autour des gares
+
+# Rayons de recherche autour des gares (2 km remplace 3 km et 1 km)
+RADIUSES_KM = (20, 15, 10, 5, 2)
 EARTH_RADIUS_KM = 6371.0088
-WEBSITE_POI_WEIGHT = 3.0  # si un poi a un site web, c'est que c'est un minimum bien
+
+# Coefficient appliqué aux POI disposant d'un site web (gage de fiabilité/visibilité)
+WEBSITE_POI_WEIGHT = 3.0
 
 
 def load_pois() -> pd.DataFrame:
-    """Charge les fichiers de POI préparés et supprime les doublons."""
+    """Charge tous les fichiers de POI, nettoie les données et supprime les doublons."""
     frames = []
+    required_cols = {"Nom", "Identifiant", "Latitude", "Longitude", "Site internet"}
+
     for category, path in POI_FILES.items():
-        # On conserve uniquement les colonnes utiles aux calculs de distance.
         poi = pd.read_csv(path)
-        poi = poi.rename(columns={"Latitude": "lat", "Longitude": "lon"})
-        # ce qu'on veut afficher pour chaque POI
-        required = {"Nom", "Identifiant", "lat", "lon", "Site internet"}
-        missing = required - set(poi.columns)
+        missing = required_cols - set(poi.columns)
         if missing:
-            raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
-        poi = poi[
-            ["Nom", "Identifiant", "lat", "lon", "Site internet"]
-        ].copy()
+            raise ValueError(f"{path} : colonnes manquantes -> {', '.join(sorted(missing))}")
+
+        # Sélection et renommage des colonnes utiles
+        poi = poi[["Nom", "Identifiant", "Latitude", "Longitude", "Site internet"]].rename(
+            columns={"Latitude": "lat", "Longitude": "lon"}
+        )
         poi["lat"] = pd.to_numeric(poi["lat"], errors="coerce")
         poi["lon"] = pd.to_numeric(poi["lon"], errors="coerce")
-        poi = poi.dropna(subset=["lat", "lon"])
+        poi = poi.dropna(subset=["lat", "lon"]).copy()
+
         poi["category"] = category
-        # Une URL non vide indique que le POI possède une fiche/site accessible.
+        # Indique si le POI possède une URL renseignée
         poi["has_website"] = (
             poi["Site internet"].astype("string").str.strip().fillna("").ne("")
         )
         frames.append(poi)
 
-    # Les fichiers sont réunis pour pouvoir supprimer les doublons communs.
+    # Fusion de toutes les catégories pour détecter les doublons inter-fichiers
     pois = pd.concat(frames, ignore_index=True)
-    pois["Identifiant"] = pois["Identifiant"].astype("string").str.strip()
+    pois["Identifiant"] = pois["Identifiant"].astype("string").str.strip().fillna("")
     pois["Nom"] = pois["Nom"].astype("string").str.strip()
 
-    # Un identifiant non vide est la meilleure clé pour vérifier les doublons.
-    identifier = pois["Identifiant"].fillna("")
-    duplicate_id = identifier.ne("") & identifier.duplicated(keep="first")
-    # Si plusieurs catégories reprennent le même identifiant, le site internet
-    # doit être conservé dès qu'au moins une des lignes en possède un.
-    if identifier.ne("").any():
-        website_by_id = pois.groupby(identifier, dropna=False)["has_website"].max()
-        pois["has_website"] = identifier.map(website_by_id).fillna(False)
+    # Si un même identifiant apparaît plusieurs fois, on conserve l'info "site web" si au moins une ligne en a un
+    has_id = pois["Identifiant"].ne("")
+    if has_id.any():
+        website_by_id = pois.groupby("Identifiant")["has_website"].max()
+        pois["has_website"] = pois["Identifiant"].map(website_by_id).fillna(False)
 
-    # Pour les lignes sans identifiant, on utilise le nom et les coordonnées.
-    coordinate_key = (
+    # Dédoublonnage par identifiant (si présent) puis par couple (coordonnées + nom normalisé)
+    duplicate_id = has_id & pois["Identifiant"].duplicated(keep="first")
+    coord_key = (
         pois["lat"].round(6).astype("string")
         + "|"
         + pois["lon"].round(6).astype("string")
     )
-    name_key = (
-        pois["Nom"]
-        .fillna("")
-        .str.lower()
-        .str.replace(r"\s+", " ", regex=True)
-    )
-    duplicate_name_coordinates = (
-        coordinate_key + "|" + name_key
-    ).duplicated(keep="first")
-    pois = pois.loc[~(duplicate_id | duplicate_name_coordinates)]
+    name_key = pois["Nom"].fillna("").str.lower().str.replace(r"\s+", " ", regex=True)
+    duplicate_coord_name = (coord_key + "|" + name_key).duplicated(keep="first")
 
-    # Cet index interne permet de relier les POI aux fichiers d'index spatial.
-    pois = pois.reset_index(drop=True)
+    pois = pois.loc[~(duplicate_id | duplicate_coord_name)].reset_index(drop=True)
+    # Identifiant numérique unique utilisé pour les jointures avec l'index spatial
     pois.insert(0, "poi_index", np.arange(len(pois)))
     return pois
 
 
 def load_stations() -> pd.DataFrame:
-    """Charge les gares en conservant les identifiants comme du texte."""
+    """Charge la liste des gares en conservant les codes en texte."""
     return pd.read_csv(
         ROOT / "data" / "stations.csv",
         dtype={"station_id": "string", "departement": "string"},
@@ -92,12 +87,12 @@ def load_stations() -> pd.DataFrame:
 
 def _get_station(
     stations: pd.DataFrame,
-    station_id: str | None,
-    station_name: str | None,
+    station_id: str | None = None,
+    station_name: str | None = None,
 ) -> pd.Series:
-    """Retourne une gare et vérifie que la recherche est unique."""
+    """Recherche une gare unique par identifiant ou par nom exact."""
     if (station_id is None) == (station_name is None):
-        raise ValueError("Provide exactly one of station_id or station_name")
+        raise ValueError("Fournir exactement un paramètre : station_id ou station_name.")
 
     if station_id is not None:
         matches = stations[stations["station_id"].eq(station_id)]
@@ -106,9 +101,9 @@ def _get_station(
         matches = stations[stations["name"].eq(station_name)]
 
     if matches.empty:
-        raise ValueError("Station not found")
+        raise ValueError("Gare introuvable.")
     if len(matches) > 1:
-        raise ValueError("station_name matches several stations; use station_id")
+        raise ValueError("Plusieurs gares portent ce nom ; utiliser station_id.")
     return matches.iloc[0]
 
 
@@ -120,21 +115,18 @@ def find_nearby_pois(
     station_name: str | None = None,
     radius_km: float = 5,
 ) -> pd.DataFrame:
-    """Retourne les POI triés par distance autour d'une gare."""
+    """Calcule à la volée les POI situés autour d'une gare, triés par distance."""
     if radius_km <= 0:
-        raise ValueError("radius_km must be positive")
+        raise ValueError("radius_km doit être strictement positif.")
 
     station = _get_station(stations, station_id, station_name)
-    # BallTree avec la métrique haversine attend des coordonnées en radians.
-    # La métrique haversine est une méthode utilisée pour calculer la distance entre deux points sur la surface d'une sphère, 
-    # en utilisant leurs coordonnées géographiques (latitude et longitude).
-    station_coordinates = np.radians([[station["lat"], station["lon"]]])
-    poi_coordinates = np.radians(pois[["lat", "lon"]].to_numpy())
-    tree = BallTree(poi_coordinates, metric="haversine")
+    # BallTree avec la métrique haversine attend des coordonnées en radians
+    station_rad = np.radians([[station["lat"], station["lon"]]])
+    pois_rad = np.radians(pois[["lat", "lon"]].to_numpy())
 
-    # La requête renvoie uniquement les POI du rayon, déjà triés par distance.
+    tree = BallTree(pois_rad, metric="haversine")
     indices, distances = tree.query_radius(
-        station_coordinates,
+        station_rad,
         r=radius_km / EARTH_RADIUS_KM,
         return_distance=True,
         sort_results=True,
@@ -150,116 +142,79 @@ def build_proximity_indexes(
     pois: pd.DataFrame,
     max_radius_km: float = 20,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Construit les liens gare-POI et la gare la plus proche de chaque POI."""
+    """Pré-calcule deux tables spatiales :
+    1. Tous les couples (gare, POI) distants d'au plus `max_radius_km`.
+    2. La gare la plus proche pour chaque POI.
+    """
     if max_radius_km <= 0:
-        raise ValueError("max_radius_km must be positive")
+        raise ValueError("max_radius_km doit être strictement positif.")
 
-    # Deux arbres permettent de répondre aux deux besoins avec le même calcul :
-    # les POI proches de chaque gare et la gare la plus proche de chaque POI.
-    station_coordinates = np.radians(stations[["lat", "lon"]].to_numpy())
-    poi_coordinates = np.radians(pois[["lat", "lon"]].to_numpy())
-    station_tree = BallTree(station_coordinates, metric="haversine")
-    poi_tree = BallTree(poi_coordinates, metric="haversine")
+    stations_rad = np.radians(stations[["lat", "lon"]].to_numpy())
+    pois_rad = np.radians(pois[["lat", "lon"]].to_numpy())
 
+    station_tree = BallTree(stations_rad, metric="haversine")
+    poi_tree = BallTree(pois_rad, metric="haversine")
+
+    # 1. Liens gare -> POI dans le rayon maximal
     poi_indices, distances = poi_tree.query_radius(
-        station_coordinates,
+        stations_rad,
         r=max_radius_km / EARTH_RADIUS_KM,
         return_distance=True,
         sort_results=True,
     )
+    counts_per_station = np.fromiter((len(idx) for idx in poi_indices), dtype=int)
+    flat_poi_idx = np.concatenate(poi_indices)
 
-    # query_radius renvoie un tableau de tableaux ; on l'aplatit pour créer
-    # une ligne par relation gare-POI.
-    link_sizes = np.fromiter((len(indices) for indices in poi_indices), dtype=int)
     station_poi_index = pd.DataFrame(
         {
-            "station_id": np.repeat(stations["station_id"].to_numpy(), link_sizes),
-            "poi_index": np.concatenate(poi_indices),
+            "station_id": np.repeat(stations["station_id"].to_numpy(), counts_per_station),
+            "poi_index": flat_poi_idx,
             "distance_km": np.concatenate(distances) * EARTH_RADIUS_KM,
-            "nom_poi": pois["Nom"].to_numpy()[np.concatenate(poi_indices)],
+            "nom_poi": pois["Nom"].to_numpy()[flat_poi_idx],
         }
     )
 
-    # Pour chaque POI, on conserve uniquement la gare la plus proche.
-    nearest_distances, nearest_indices = station_tree.query(poi_coordinates, k=1)
+    # 2. Gare la plus proche pour chaque POI
+    nearest_dist, nearest_idx = station_tree.query(pois_rad, k=1)
     poi_nearest_station = pd.DataFrame(
         {
             "poi_index": pois["poi_index"].to_numpy(),
-            "nom_poi": pois["Nom"].to_numpy()[nearest_indices[:, 0]],
-            "station_id": stations.iloc[nearest_indices[:, 0]]["station_id"].to_numpy(),
-            "distance_km": nearest_distances[:, 0] * EARTH_RADIUS_KM,
+            "nom_poi": pois["Nom"].to_numpy(),
+            "station_id": stations.iloc[nearest_idx[:, 0]]["station_id"].to_numpy(),
+            "distance_km": nearest_dist[:, 0] * EARTH_RADIUS_KM,
         }
     )
     return station_poi_index, poi_nearest_station
 
 
-def find_nearby_pois_from_index(
-    stations: pd.DataFrame,
-    pois: pd.DataFrame,
-    station_poi_index: pd.DataFrame,
-    *,
-    station_id: str | None = None,
-    station_name: str | None = None,
-    radius_km: float = 5,
-) -> pd.DataFrame:
-    """Recherche les POI en filtrant un index spatial déjà calculé."""
-    if radius_km <= 0:
-        raise ValueError("radius_km must be positive")
-
-    station = _get_station(stations, station_id, station_name)
-    station_id = station["station_id"]
-    # L'index contient déjà toutes les relations jusqu'à 20 km.
-    assert station_id is not None
-    links = station_poi_index[
-        station_poi_index["station_id"].eq(station_id)
-        & station_poi_index["distance_km"].le(radius_km)
-    ]
-    return (
-        links.merge(pois, on="poi_index", how="left")
-        .sort_values("distance_km")
-        .reset_index(drop=True)
-    )
-
-
-def _query_features(
+def _compute_category_features(
     tree: BallTree,
-    coordinates: np.ndarray,
+    station_rad: np.ndarray,
     prefix: str,
     radiuses_km: tuple[int, ...],
-    poi_weights: np.ndarray | None = None,
+    poi_weights: np.ndarray,
 ) -> dict[str, np.ndarray]:
-    """Compte les POI dans chaque rayon et trouve le plus proche."""
+    """Calcule pour une catégorie donnée :
+    - le nombre brut de POI par rayon,
+    - le score pondéré par la présence d'un site web,
+    - la distance au POI le plus proche.
+    """
     features = {}
     for radius_km in radiuses_km:
-        # Le rayon est converti en radians pour BallTree.
         matches = tree.query_radius(
-            coordinates,
+            station_rad,
             r=radius_km / EARTH_RADIUS_KM,
             return_distance=False,
         )
-        counts = np.fromiter(
-            (len(poi_indices) for poi_indices in matches),
-            dtype=int,
-            count=len(matches),
+        features[f"{prefix}_count_{radius_km}km"] = np.fromiter(
+            (len(idx) for idx in matches), dtype=int, count=len(matches)
         )
-        features[f"{prefix}_count_{radius_km}km"] = counts
+        features[f"{prefix}_website_weighted_count_{radius_km}km"] = np.fromiter(
+            (poi_weights[idx].sum() for idx in matches), dtype=float, count=len(matches)
+        )
 
-        # Un POI avec site internet reçoit un poids supérieur aux autres.
-        if poi_weights is not None:
-            weighted_counts = np.array(
-                [
-                    poi_weights[poi_indices].sum()
-                    for poi_indices in matches
-                ],
-                dtype=float,
-            )
-            features[f"{prefix}_website_weighted_count_{radius_km}km"] = (
-                weighted_counts
-            )
-
-    # On ajoute aussi la distance vers le POI le plus proche.
-    nearest, _ = tree.query(coordinates, k=1)
-    features[f"{prefix}_nearest_km"] = nearest[:, 0] * EARTH_RADIUS_KM
+    nearest_dist, _ = tree.query(station_rad, k=1)
+    features[f"{prefix}_nearest_km"] = nearest_dist[:, 0] * EARTH_RADIUS_KM
     return features
 
 
@@ -268,58 +223,52 @@ def compute_station_features(
     pois: pd.DataFrame,
     radiuses_km: tuple[int, ...] = RADIUSES_KM,
 ) -> pd.DataFrame:
-    """Calcule les features de distance pour toutes les gares."""
-    station_coordinates = np.radians(stations[["lat", "lon"]].to_numpy())
+    """Enrichit chaque gare avec les compteurs de POI par rayon et catégorie."""
+    station_rad = np.radians(stations[["lat", "lon"]].to_numpy())
     features = stations.copy()
 
-    # Un arbre est construit pour l'ensemble des POI puis pour chaque catégorie.
+    # Calcul global ("all") puis par catégorie touristique
     for category in ["all", *pois["category"].unique()]:
-        category_pois = pois if category == "all" else pois[pois["category"] == category]
-        if category_pois.empty:
+        subset = pois if category == "all" else pois[pois["category"] == category]
+        if subset.empty:
             continue
-        poi_coordinates = np.radians(category_pois[["lat", "lon"]].to_numpy())
-        tree = BallTree(poi_coordinates, metric="haversine")
-        # Poids 1 sans site, 3 avec site internet.
-        poi_weights = np.where(
-            category_pois["has_website"].fillna(False).to_numpy(),
+
+        poi_rad = np.radians(subset[["lat", "lon"]].to_numpy())
+        tree = BallTree(poi_rad, metric="haversine")
+
+        # Poids de 3 si le POI a un site internet, 1 sinon
+        weights = np.where(
+            subset["has_website"].fillna(False).to_numpy(),
             WEBSITE_POI_WEIGHT,
             1.0,
         )
         prefix = "poi" if category == "all" else category
-        for feature_name, values in _query_features(
-            tree,
-            station_coordinates,
-            prefix,
-            radiuses_km,
-            poi_weights,
-        ).items():
-            features[feature_name] = values
+        col_dict = _compute_category_features(
+            tree, station_rad, prefix, radiuses_km, weights
+        )
+        for col_name, values in col_dict.items():
+            features[col_name] = values
 
     return features
 
 
 def main() -> None:
-    """Recalcule et sauvegarde les features gare-POI."""
+    """Génère et sauvegarde les features des gares ainsi que les index spatiaux."""
     stations = load_stations()
     pois = load_pois()
-    features = compute_station_features(stations, pois)
-    output = ROOT / "data" / "station_features.csv"
-    features.to_csv(output, index=False)
-    print(f"POIs used: {len(pois)}")
-    print(f"Stations enriched: {len(features)}")
-    print(f"Saved to {output}")
-    
-    station_poi_index, poi_nearest_station = build_proximity_indexes(stations, pois)
 
+    features = compute_station_features(stations, pois)
+    features_path = ROOT / "data" / "station_features.csv"
+    features.to_csv(features_path, index=False)
+
+    station_poi_index, poi_nearest_station = build_proximity_indexes(stations, pois)
     station_poi_path = ROOT / "data" / "station_poi_index.csv"
     nearest_station_path = ROOT / "data" / "poi_nearest_station.csv"
     station_poi_index.to_csv(station_poi_path, index=False)
     poi_nearest_station.to_csv(nearest_station_path, index=False)
 
-    print(f"Station-POI links: {len(station_poi_index)}")
-    print(f"POIs indexed: {len(poi_nearest_station)}")
-    print(f"Saved to {station_poi_path}")
-    print(f"Saved to {nearest_station_path}")
+    print(f"POI traités : {len(pois)} | Gares enrichies : {len(features)}")
+    print(f"Liens gare-POI enregistrés : {len(station_poi_index)}")
 
 
 if __name__ == "__main__":
