@@ -24,10 +24,18 @@ To update the SNCF timetable (GTFS) used by the journey planner, run the followi
 curl -L -o data/gtfs_sncf.zip "https://www.data.gouv.fr/api/1/datasets/r/9ae758ec-cd7a-40cd-a890-bb3963224942"
 ```
 
-To rebuild `data/paris_transfers.csv` (metro/RER/tram time between the SNCF stations of the Paris area, computed from the Île-de-France Mobilités timetable), run the following command. The IDFM file is about 113 MB and valid about one month; change `DATE` in the script to a weekday inside its validity.
+To rebuild `data/station_transfers.csv` (time by local public transport between SNCF stations of the same city: Paris, Lyon, Lille, Toulouse, Montpellier, Clermont-Ferrand, Mâcon, Aix-Marseille), run the following command. It uses the official timetable (GTFS) of each local network, from transport.data.gouv.fr / data.gouv.fr. The script picks a weekday inside each file's validity by itself.
 ```
-curl -L -o data/raw/idfm_gtfs.zip "https://www.data.gouv.fr/api/1/datasets/r/413988ed-d340-467b-8be2-7b999fcd207a"
-python scripts/data_prep/build_paris_transfers.py
+mkdir -p data/raw/transit
+curl -L -o data/raw/transit/paris_idfm.zip "https://www.data.gouv.fr/api/1/datasets/r/413988ed-d340-467b-8be2-7b999fcd207a"
+curl -L -o data/raw/transit/lyon_tcl.zip "https://www.data.gouv.fr/api/1/datasets/r/abebedc6-28cf-4e2e-9c64-db57a40156f8"
+curl -L -o data/raw/transit/lille_ilevia.zip "https://www.data.gouv.fr/api/1/datasets/r/c9e5dd3f-8eed-4ad7-aec2-915240599cf6"
+curl -L -o data/raw/transit/toulouse_tisseo.zip "https://www.data.gouv.fr/api/1/datasets/r/64318177-f5b5-4144-a6be-2d0f22d26c77"
+curl -L -o data/raw/transit/montpellier_tam.zip "https://www.data.gouv.fr/api/1/datasets/r/93a29ce2-cfc8-44ff-b712-bcfd814b7f00"
+curl -L -o data/raw/transit/clermont_t2c.zip "https://www.data.gouv.fr/api/1/datasets/r/4e237a58-cd14-4746-b729-1337a40a8a7b"
+curl -L -o data/raw/transit/macon_trema.zip "https://www.data.gouv.fr/api/1/datasets/r/0a01b036-796f-43a3-9c64-a2f6024427b0"
+curl -L -o data/raw/transit/aix_marseille.zip "https://www.data.gouv.fr/api/1/datasets/r/0d9a808a-9a9b-4fa1-b04f-339bbf2cfeb1"
+python scripts/data_prep/build_station_transfers.py
 ```
 
 ## Shape

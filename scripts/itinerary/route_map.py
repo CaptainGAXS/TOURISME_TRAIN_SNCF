@@ -16,10 +16,9 @@ COLORS = {
     "TramTrain": [30, 150, 80],
     "Car TER": [240, 150, 0],
     "Car à réservation": [240, 150, 0],
-    "walk": [130, 130, 130],
-    "metro/RER": [130, 130, 130],  # transfer between Paris stations (data/paris_transfers.csv)
 }
 OTHER_COLOR = [90, 60, 160]  # ICE, Lyria, ...
+LOCAL_COLOR = [130, 130, 130]  # walk, metro, tram, bus between stations of the same city
 
 
 # def hhmm(seconds):
@@ -31,17 +30,17 @@ def journey_layers(legs, stations, trips):
 
     for leg in legs:
         ids = leg_stations(leg, trips)
-        if leg["mode"] != "train":  # "walk" or "metro/RER"
-            kind, title = leg["mode"], leg["mode"].capitalize()
+        if leg["mode"] != "train":  # "walk", "metro/RER", "tram", "bus"...
+            color, title = LOCAL_COLOR, leg["mode"].capitalize()
         else:
             kind = trips[leg["trip"]]["kind"]
-            title = f"{kind} {trips[leg['trip']]['number']}"
+            color, title = COLORS.get(kind, OTHER_COLOR), f"{kind} {trips[leg['trip']]['number']}"
         start, end = stations[leg["from"]]["name"], stations[leg["to"]]["name"]
 
         lines.append(
             {
                 "path": [[stations[s]["lon"], stations[s]["lat"]] for s in ids],
-                "color": COLORS.get(kind, OTHER_COLOR),
+                "color": color,
                 "name": f"{title}: {start} {hhmm(leg['dep'])} → {end} {hhmm(leg['arr'])}",
             }
         )
