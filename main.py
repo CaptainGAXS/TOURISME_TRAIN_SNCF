@@ -6,7 +6,7 @@ import numpy as np # type: ignore
 
 from show_map import render_map
 
-def map_selector():
+def map_selector(display_area):
     st.sidebar.write("Choisissez un fond avant les données.")
     st.sidebar.divider()
     st.sidebar.write("Fonds de carte :")
@@ -47,9 +47,9 @@ def map_selector():
         layers = [heatmap_layer] + layers
 
     if st.session_state.selected_map:
-        render_map(st.session_state.selected_map, layers)
+        render_map(display_area, st.session_state.selected_map, layers)
     else:
-        st.write("Sélectionnez une option dans la barre latérale pour afficher la carte correspondante.")
+        display_area.write("Sélectionnez une option dans la barre latérale pour afficher la carte correspondante.")
 
 def normalize_visitors(visitors):
     # Increased minimum radius so base stations are visible at national zoom
@@ -75,6 +75,22 @@ def grab_poi_data(poi_type):
         radiusPixels=50,     # Adjust the spread of the heat
     )
     return heatmap_layer
+
+def station_selector(display_area):
+    df_dep= pd.read_csv("data/departements-france.csv", sep=",")
+    df_stations = pd.read_csv("data/stations.csv", sep=",")
+    df_poi = pd.read_csv("data/station_poi_index.csv", sep=",")
+    st.session_state.selected_department = st.sidebar.selectbox("Choisissez un département:", df_dep["nom_departement"], index = None, placeholder="Filtrage par département")
+    if st.session_state.selected_department:
+        dep_number = df_dep[df_dep["nom_departement"] == st.session_state.selected_department]["code_departement"].values[0]
+        filtered_stations = df_stations[df_stations["departement"] == dep_number]
+        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"], index = None, placeholer= "Gares du département choisi")
+    else:
+        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", df_stations["name"], index = None, placeholder = "Gares")
+    if st.session_state.selected_station:
+        station_index = df_stations[df_stations["name"] == st.session_state.selected_station]["station_id"].values[0]
+        poi_list = df_poi[df_poi["station_id"] == station_index]["poi_index"]
+        display_area.write(f"Les points d'intérêt autour de la gare {st.session_state.selected_station} sont : \n{poi_list.values}")
 
 def weight_poi_prox(poi_count_20km,poi_count_15km,poi_count_10km,poi_count_5km):
     weights = {
@@ -123,7 +139,9 @@ def grab_station_data():
     return scatter_layer
 
 def main():
-    map_selector()
+    display_area = st.empty()
+    map_selector(display_area)
+    station_selector(display_area)
 
 if __name__ == "__main__":
     main()
