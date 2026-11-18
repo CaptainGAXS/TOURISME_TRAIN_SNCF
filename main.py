@@ -145,7 +145,7 @@ def grab_station_data():
 def main():
     display_area = st.empty()
     map_selector(display_area)
-    station_selector(display_area)
+    # station_selector(display_area)
 
 if __name__ == "__main__":
     main()
