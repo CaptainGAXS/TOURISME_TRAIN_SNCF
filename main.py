@@ -235,7 +235,7 @@ def render_recommender_section():
                             criteria,
                             get_pois(),
                             get_station_poi_index(),
-                            n_pois=10,
+                            n_pois=20,
                             favor_poi_with_website=recommender.favor_poi_with_website,
                         )
                         st.session_state.reco_results = results
