@@ -174,6 +174,7 @@ def pre_traitement_evenements(nom_sortie : str) -> pd.DataFrame:
         "Dernière date - Fin",
         "Coordonnées géographiques",
         "Site web du lieu",
+        "Ville",
     ]
     df = pd.read_csv(
         NAME_FILE_EVENTS,
@@ -192,6 +193,9 @@ def pre_traitement_evenements(nom_sortie : str) -> pd.DataFrame:
             "Site internet": df["Site web du lieu"],
             "Date début": df["Première date - Début"],
             "Date fin": df["Dernière date - Fin"],
+            # La ville est conservée en dernière colonne pour identifier
+            # facilement le lieu de chaque événement.
+            "Ville": df["Ville"],
         }
     )
     df_final = nettoyer_poi(df_final)
