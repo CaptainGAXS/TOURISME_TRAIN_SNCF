@@ -13,6 +13,9 @@ from scripts.research.recommender import (
 )
 from scripts.research.station_features import load_pois
 from show_map import render_map
+from pathlib import Path
+
+HELP_PATH = Path(__file__).parent / "data/help_button.md"
 
 st.set_page_config(
     page_title="Tourisme Train SNCF",
@@ -250,6 +253,7 @@ def render_sidebar():
 
     # Call the fragment inside the sidebar context
     with st.sidebar:
+        render_help_button()
         render_recommender_section()
 
     # --- 2. Map layers ---
@@ -411,6 +415,20 @@ def render_itinerary_tab():
 
     col_results.warning("Pas de train SNCF trouvé pour cette paire de gares.")
     return []
+
+# ---------------------------------------------------------------------------
+# Help button
+# ---------------------------------------------------------------------------
+
+@st.dialog("Aide & Guide d'utilisation")
+def show_help_dialog():
+    st.markdown(HELP_PATH.read_text(encoding="utf-8"))
+
+
+@st.fragment
+def render_help_button():
+    if st.button("Aide", use_container_width=True):
+        show_help_dialog()
 
 
 def main():

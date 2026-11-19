@@ -37,5 +37,6 @@ def render_map(display_area, mappath, layers = []):
         tooltip=custom_tooltip
     )
 
+    deck_html = deck.to_html(as_string=True)
     with display_area:
-        pdk.chart(deck, height=800)
+        components.html(deck_html, height=800)
