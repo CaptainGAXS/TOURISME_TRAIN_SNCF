@@ -49,7 +49,11 @@ def get_stations_df():
 
 @st.cache_data
 def get_station_poi_index():
-    return pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
+    return pd.read_csv(
+        "data/station_poi_index.csv.gz",
+        dtype={"station_id": "string"},
+        compression="gzip",
+    )
 
 
 @st.cache_data

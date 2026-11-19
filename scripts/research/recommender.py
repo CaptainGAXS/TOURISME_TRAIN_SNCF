@@ -412,8 +412,9 @@ def main() -> None:
 
     pois = load_pois()
     station_poi_index = pd.read_csv(
-        ROOT / "data" / "station_poi_index.csv",
+        ROOT / "data" / "station_poi_index.csv.gz",
         dtype={"station_id": "string"},
+        compression="gzip",
     )
 
     top_pois = get_top_pois_for_recommendations(
