@@ -21,12 +21,12 @@ sys.path.append("scripts/itinerary")  # for itinerary_ui.py
 try:
     from .carbon import car_co2, journey_co2, leg_co2
     from .network import load_network
-    from .planner import describe, plan
+    from .planner import describe, hhmm, mode_name, plan
     from .route_map import journey_layers
 except ImportError:
     from carbon import car_co2, journey_co2, leg_co2
     from network import load_network
-    from planner import describe, plan
+    from planner import describe, hhmm, mode_name, plan
     from route_map import journey_layers
 
 
@@ -34,6 +34,9 @@ def co2_text(kg):
     """1.2845 -> '1,28 kg CO2e' (French decimal comma)"""
     return f"{kg:.2f}".replace(".", ",") + " kg CO2e"
 
+@st.cache_data(show_spinner="Calcul des trajets...")
+def cached_plan(_network, day_key, origin, destination, start_seconds, n=5):
+    return plan(_network, origin, destination, start_seconds, n=n)
 
 @st.cache_resource(show_spinner="Chargement des horaires...")
 def get_network(day):
@@ -57,7 +60,8 @@ def journey_panel(network, origin, destination, start_seconds, container=st.side
     stations, connections, trips, footpaths = network
 
     # ---- search
-    journeys = plan(network, origin, destination, start_seconds, n=5)
+    day_key = str(st.session_state.get("itin_date", ""))
+    journeys = cached_plan(network, day_key, origin, destination, start_seconds, n=5)
     if not journeys:
         container.warning("Aucun trajet trouvé.")
         return []
@@ -75,26 +79,50 @@ def journey_panel(network, origin, destination, start_seconds, container=st.side
         key="itin_choice",
     )
     legs = journeys[choice]
-    lines = describe(
-        legs, stations, trips
-    ).splitlines()  # line 0 = summary, then 1 line per leg
-    for i, leg in enumerate(legs):
-        if leg["mode"] == "train":
-            lines[i + 1] += "  " + co2_text(leg_co2(leg, stations, trips))
 
     # ---- whole journey vs. car
     train_kg = journey_co2(legs, stations, trips)
     car_kg = car_co2(origin, destination, stations)
-    lines.append("")
-    lines.append(f"Total (train) : {co2_text(train_kg)}")
-    car_line = f"Voiture : {co2_text(car_kg)}"
-    if train_kg > 0:  # 0 when the journey is only walking
-        car_line += f"  (x{car_kg / train_kg:.0f})"
-    lines.append(car_line)
-    container.code("\n".join(lines), language=None)
+    col1, col2 = container.columns(2)
+    col1.metric("Train", co2_text(train_kg))
+    if train_kg > 0:
+        ratio = car_kg / train_kg
+        col2.metric(
+            "Voiture (2,2 pers.)",
+            co2_text(car_kg),
+            delta=f"×{ratio:.0f} plus élevé",
+            delta_color="inverse",
+        )
+    else:
+        col2.metric("Voiture (2,2 pers.)", co2_text(car_kg))
+
+    # ---- Step-by-step itinerary card
+    with container.container(border=True):
+        st.markdown("**Détail du trajet**")
+        for leg in legs:
+            start_name = stations[leg["from"]]["name"]
+            end_name = stations[leg["to"]]["name"]
+            dep_str = hhmm(leg["dep"])
+            arr_str = hhmm(leg["arr"])
+
+            if leg["mode"] == "train":
+                trip = trips[leg["trip"]]
+                label = f"{trip['kind']} {trip['number']}"
+                co2_str = f" · *{co2_text(leg_co2(leg, stations, trips))}*"
+            else:
+                mins = (leg["arr"] - leg["dep"]) // 60
+                label = f"{mode_name(leg['mode']).capitalize()} ({mins} min)"
+                co2_str = ""
+
+            st.markdown(
+                f"**{label}**{co2_str}  \n"
+                f"`{dep_str}` {start_name} → `{arr_str}` {end_name}"
+            )
+
     container.caption(
-        "Estimation du CO2e par voyageur (facteurs SNCF par km x distance)."
+        "Estimation du CO₂e par voyageur (facteurs SNCF par km × distance)."
     )
+
 
     return journey_layers(legs, stations, trips)
 
