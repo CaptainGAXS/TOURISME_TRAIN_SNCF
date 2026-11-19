@@ -172,7 +172,6 @@ def build_proximity_indexes(
             "station_id": np.repeat(stations["station_id"].to_numpy(), counts_per_station),
             "poi_index": flat_poi_idx,
             "distance_km": np.concatenate(distances) * EARTH_RADIUS_KM,
-            "nom_poi": pois["Nom"].to_numpy()[flat_poi_idx],
         }
     )
 
@@ -264,9 +263,11 @@ def main() -> None:
     features.to_csv(features_path, index=False)
 
     station_poi_index, poi_nearest_station = build_proximity_indexes(stations, pois)
-    station_poi_path = ROOT / "data" / "station_poi_index.csv"
+    station_poi_path = ROOT / "data" / "station_poi_index.csv.gz"
+    legacy_station_poi_path = ROOT / "data" / "station_poi_index.csv"
     nearest_station_path = ROOT / "data" / "poi_nearest_station.csv"
-    station_poi_index.to_csv(station_poi_path, index=False)
+    station_poi_index.to_csv(station_poi_path, index=False, compression="gzip")
+    legacy_station_poi_path.unlink(missing_ok=True)
     poi_nearest_station.to_csv(nearest_station_path, index=False)
 
     print(f"POI traités : {len(pois)} | Gares enrichies : {len(features)}")

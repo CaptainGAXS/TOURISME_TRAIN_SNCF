@@ -120,7 +120,7 @@ site.
     ├── raw/                        # Sources téléchargées
     ├── stations.csv                # Liste des gares
     ├── station_features.csv        # Features touristiques des gares
-    ├── station_poi_index.csv       # Liens gare-POI
+    ├── station_poi_index.csv.gz    # Liens gare-POI compressés
     ├── poi_nearest_station.csv     # Gare la plus proche de chaque POI
     ├── hpoi.csv                   # Points culturels
     ├── npoi.csv                   # Points naturels

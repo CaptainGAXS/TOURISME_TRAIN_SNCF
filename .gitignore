@@ -3,6 +3,3 @@ venv/*
 env/*
 .env
 __pycache__
-data/*.csv
-data/*.zip
-data/*.geojson
