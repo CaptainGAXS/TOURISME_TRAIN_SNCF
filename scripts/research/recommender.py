@@ -72,6 +72,11 @@ class RecommendationCriteria:
 class TourismRecommender:
     """Moteur de recommandation de gares basé sur le clustering K-Means."""
 
+    CITY_GROUP_RADIUS_KM = 5.0
+    # Évite que les gares proches dominent systématiquement avec leurs scores
+    # de fréquentation et de POI.
+    DISTANCE_WEIGHT = 0.15
+
     def __init__(
         self,
         n_clusters: int = 6,
@@ -196,6 +201,39 @@ class TourismRecommender:
             .strip()
         )
 
+    @classmethod
+    def _city_keys(cls, stations: pd.DataFrame) -> pd.Series:
+        """Retourne une clé commune aux gares situées dans la même ville."""
+        for column in ("city", "commune", "insee"):
+            if column in stations.columns:
+                values = stations[column].astype("string").str.strip()
+                if values.notna().all() and values.ne("").all():
+                    return values
+
+        # station_features.csv ne contient pas toujours le code commune.
+        # Dans ce cas, les gares d'une même ville sont regroupées spatialement.
+        coordinates = np.radians(stations[["lat", "lon"]].to_numpy())
+        tree = BallTree(coordinates, metric="haversine")
+        neighbours = tree.query_radius(
+            coordinates, r=cls.CITY_GROUP_RADIUS_KM / EARTH_RADIUS_KM
+        )
+        groups = np.arange(len(stations))
+
+        def find(index: int) -> int:
+            while groups[index] != index:
+                groups[index] = groups[groups[index]]
+                index = groups[index]
+            return index
+
+        for index, nearby in enumerate(neighbours):
+            root = find(index)
+            for other in nearby:
+                other_root = find(int(other))
+                if root != other_root:
+                    groups[other_root] = root
+
+        return pd.Series([find(index) for index in range(len(stations))], index=stations.index)
+
     def recommend(
         self,
         criteria: RecommendationCriteria | None = None,
@@ -283,16 +321,33 @@ class TourismRecommender:
         )
         popularity_score = pop_values / pop_max
 
-        candidates["recommendation_score"] = (
+        base_score = (
             (1 - self.popularity_weight) * tourism_score
             + self.popularity_weight * popularity_score
         )
+        if criteria.departure_station:
+            distance_scale = (
+                criteria.max_distance_km
+                or candidates["distance_from_departure_km"].max()
+            )
+            distance_score = (
+                candidates["distance_from_departure_km"] / distance_scale
+            ).clip(lower=0, upper=1)
+            candidates["recommendation_score"] = (
+                (1 - self.DISTANCE_WEIGHT) * base_score
+                + self.DISTANCE_WEIGHT * distance_score
+            )
+        else:
+            candidates["recommendation_score"] = base_score
         candidates["cluster_score"] = candidates["cluster"].map(cluster_scores)
         candidates["dominant_category"] = category_scores.mul(preferences).idxmax(axis=1)
 
+        candidates["city_key"] = self._city_keys(candidates)
         return (
             candidates.sort_values(["recommendation_score", "cluster_score"], ascending=False)
+            .drop_duplicates("city_key")
             .head(n_results)
+            .drop(columns="city_key")
             .reset_index(drop=True)
         )
 
@@ -302,10 +357,10 @@ def get_top_pois_for_recommendations(
     criteria: RecommendationCriteria,
     pois: pd.DataFrame,
     station_poi_index: pd.DataFrame,
-    n_pois: int = 5,
+    n_pois: int = 20,
     favor_poi_with_website: bool = True,
 ) -> pd.DataFrame:
-    """Retourne les meilleurs POI autour de chaque gare recommandée."""
+    """Retourne des POI répartis selon les préférences autour de chaque gare."""
     if n_pois <= 0:
         raise ValueError("n_pois doit être strictement positif.")
     if "station_id" not in recommendations.columns:
@@ -335,11 +390,38 @@ def get_top_pois_for_recommendations(
             - top_pois["distance_km"] / (criteria.radius_km or 1)
         )
 
-        best_for_station = (
-            top_pois.sort_values(["attractivity_score", "distance_km"], ascending=[False, True])
-            .head(n_pois)
-            .reset_index(drop=True)
+        # Répartition proportionnelle aux préférences, avec la méthode du
+        # plus fort reste pour distribuer exactement n_pois emplacements.
+        category_preferences = pd.Series(prefs)
+        quotas_float = category_preferences * n_pois
+        quotas = quotas_float.astype(int)
+        remaining_slots = n_pois - int(quotas.sum())
+        if remaining_slots:
+            remainders = (quotas_float - quotas).sort_values(ascending=False)
+            quotas.loc[remainders.head(remaining_slots).index] += 1
+
+        selected_parts = []
+        for category, quota in quotas.items():
+            if quota <= 0:
+                continue
+            category_pois = top_pois[
+                top_pois["category"].map(POI_CATEGORY_BY_TYPE).eq(category)
+            ].sort_values(["attractivity_score", "distance_km"], ascending=[False, True])
+            selected_parts.append(category_pois.head(int(quota)))
+
+        selected_indexes = (
+            pd.concat(selected_parts).index.unique() if selected_parts else pd.Index([])
         )
+        remaining_pois = top_pois.drop(index=selected_indexes)
+        missing_slots = n_pois - len(selected_indexes)
+        if missing_slots > 0:
+            selected_parts.append(
+                remaining_pois.sort_values(
+                    ["attractivity_score", "distance_km"], ascending=[False, True]
+                ).head(missing_slots)
+            )
+
+        best_for_station = pd.concat(selected_parts).reset_index(drop=True)
         best_for_station.insert(0, "station_name", station["name"])
         results.append(best_for_station)
 
@@ -360,8 +442,8 @@ def main() -> None:
         events=0.0,
         attractions=0.0,
         radius_km=10,
-        departure_station="Paris Est",
-        max_distance_km=300,
+        departure_station="Nancy",
+        max_distance_km=100,
         exclude_paris=True,
     )
 
@@ -386,7 +468,7 @@ def main() -> None:
         criteria,
         pois,
         station_poi_index,
-        n_pois=5,
+        n_pois=20,
         favor_poi_with_website=recommender.favor_poi_with_website,
     )
     print(
