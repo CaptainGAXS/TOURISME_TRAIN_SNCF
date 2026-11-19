@@ -172,7 +172,7 @@ def init_state():
 
 @st.fragment
 def render_recommender_section():
-    with st.expander("Trouver une destination", expanded=True):
+    with st.expander("Trouver une destination", expanded=False):
         stations_df = get_station_features()
         station_names = stations_df["name"].sort_values().tolist()
         default_idx = (
@@ -254,10 +254,8 @@ def render_sidebar():
     # Call the fragment inside the sidebar context
     with st.sidebar:
         render_help_button()
-        render_recommender_section()
 
-    # --- 2. Map layers ---
-    with st.sidebar.expander("Couches de la carte", expanded=False):
+    with st.sidebar.expander("Couches de la carte", expanded=True):
         map_choice = st.radio(
             "Fond de carte",
             ["Régions", "Départements"],
@@ -281,6 +279,9 @@ def render_sidebar():
                 "Gares et proximité de POI",
             ],
         )
+
+    with st.sidebar:
+        render_recommender_section()
 
     layers = []
     heatmap_map = {
