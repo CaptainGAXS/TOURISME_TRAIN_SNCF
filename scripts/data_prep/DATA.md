@@ -1,5 +1,21 @@
 # Download and prepare SNCF station data and tourism data
 
+## Build everything automatically
+
+Depuis la racine du projet :
+
+```bash
+python scripts/build_all_data.py
+```
+
+Le script telecharge les donnees sources dans `data/raw/` (et les GTFS dans
+`data/`), cree `venv/` si necessaire, installe les dependances, puis lance les
+builds des gares, du tourisme, des features gare-POI et des correspondances
+de transport local.
+
+Utilisez `--refresh` pour retélécharger les fichiers deja presents, ou
+`--skip-transfers` pour sauter la reconstruction des correspondances locales.
+
 ## Build if necessary
 
 From the project root:
@@ -11,6 +27,12 @@ curl -L -o data/raw/v_departement_2026.csv "https://www.insee.fr/fr/statistiques
 curl -L -o data/raw/v_region_2026.csv "https://www.insee.fr/fr/statistiques/fichier/8740222/v_region_2026.csv"
 python scripts/data_prep/build_stations.py
 ```
+
+To have the map of France with regions and departments, run the following command:
+```
+curl -L -o data/regions.geojson "https://www.data.gouv.fr/api/1/datasets/r/a0fdb1a8-ad6a-44b6-aa89-c9454f3a1626"
+curl -L -o data/departements.geojson "https://www.data.gouv.fr/api/1/datasets/r/14587662-7136-44c7-954c-3080baa1886e"
+
 
 To have the tourism data ready, run the following command:
 ```
