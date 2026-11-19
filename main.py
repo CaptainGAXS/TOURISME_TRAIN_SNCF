@@ -1,8 +1,8 @@
-from pydeck.types import String # type: ignore
-import pandas as pd # type: ignore
-import streamlit as st # type: ignore
-import pydeck as pdk # type: ignore
-import numpy as np # type: ignore
+from pydeck.types import String  # type: ignore
+import pandas as pd  # type: ignore
+import streamlit as st  # type: ignore
+import pydeck as pdk  # type: ignore
+import numpy as np  # type: ignore
 
 from show_map import render_map
 from scripts.itinerary.itinerary_ui import itinerary_sidebar,date_time_inputs, journey_panel
@@ -94,6 +94,14 @@ def destination_recommender_ui():
                     # Format the distance
                     display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
                     
+                    # Internal category codes -> same labels as the preference sliders
+                    display_pois["category"] = display_pois["category"].replace({
+                        "hpoi": "Culture",
+                        "npoi": "Nature",
+                        "epoi": "Événements",
+                        "attraction": "Attractions",
+                    })
+
                     # Clean up missing websites for a better display
                     display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
                     
@@ -101,7 +109,7 @@ def destination_recommender_ui():
                     display_pois.rename(columns={
                         "category": "Catégorie", 
                         "distance_km": "Distance",
-                        "Site internet": "Site Web"
+                        "Site internet": "Site web"
                     }, inplace=True)
                     
                     # Display as a clean table on the main screen
@@ -110,7 +118,7 @@ def destination_recommender_ui():
                         hide_index=True, 
                         use_container_width=True,
                         column_config={
-                            "Site Web": st.column_config.LinkColumn("Site Web")
+                            "Site web": st.column_config.LinkColumn("Site web")
                         }
                     )
                 else:
@@ -140,8 +148,15 @@ def map_selector(display_area):
         layers.append(scatter_layer)
 
     heatmap_choice = st.sidebar.radio(
-        "Cartes de chaleur:", 
-        ["Aucune", "POI naturels", "POI historiques", "POI évenementiels", "Parcs d'attraction", "Gares et proximité de POI"]
+        "Cartes de chaleur :",
+        [
+            "Aucune",
+            "POI naturels",
+            "POI historiques",
+            "POI événementiels",
+            "Parcs d'attractions",
+            "Gares et proximité de POI",
+        ],
     )
     if heatmap_choice == "POI naturels":
         heatmap_layer = grab_poi_data("npoi")
@@ -149,10 +164,10 @@ def map_selector(display_area):
     if heatmap_choice == "POI historiques":
         heatmap_layer = grab_poi_data("hpoi")
         layers = [heatmap_layer] + layers
-    if heatmap_choice == "POI évenementiels":
+    if heatmap_choice == "POI événementiels":
         heatmap_layer = grab_poi_data("epoi")
         layers = [heatmap_layer] + layers
-    if heatmap_choice == "Parcs d'attraction":
+    if heatmap_choice == "Parcs d'attractions":
         heatmap_layer = grab_poi_data("attractions_france")
         layers = [heatmap_layer] + layers
     if heatmap_choice == "Gares et proximité de POI":
@@ -168,8 +183,12 @@ def map_selector(display_area):
         # station name -> UIC code -> GTFS station (names differ, e.g. "Paris Gare de Lyon Hall 1 - 2")
         stations_df = pd.read_csv("data/stations.csv", dtype={"uic": "string"})
         name_to_uic = dict(zip(stations_df["name"], stations_df["uic"]))
-        origin_id = uic_to_station_id(name_to_uic.get(st.session_state.departure_name), gtfs_stations)
-        destination_id = uic_to_station_id(name_to_uic.get(st.session_state.selected_itinerary), gtfs_stations)
+        origin_id = uic_to_station_id(
+            name_to_uic.get(st.session_state.departure_name), gtfs_stations
+        )
+        destination_id = uic_to_station_id(
+            name_to_uic.get(st.session_state.selected_itinerary), gtfs_stations
+        )
 
         if origin_id and destination_id:
             map_layers = journey_panel(network, origin_id, destination_id, start_seconds)
@@ -184,66 +203,91 @@ def map_selector(display_area):
     if st.session_state.selected_map:
         render_map(display_area, st.session_state.selected_map, layers)
     else:
-        display_area.write("Sélectionnez une option dans la barre latérale pour afficher la carte correspondante.")
+        display_area.write(
+            "Sélectionnez une option dans la barre latérale pour afficher la carte correspondante."
+        )
 
 
 def normalize_visitors(visitors):
     # Increased minimum radius so base stations are visible at national zoom
-    min_radius = 3 # 500 for meters
-    max_radius = 30 # 20000 for meters
-    
+    min_radius = 3  # 500 for meters
+    max_radius = 30  # 20000 for meters
+
     # Using Square Root scaling to prevent Gare du Nord from squashing the rest of the data
     sqrt_visitors = np.sqrt(visitors)
     min_sqrt = np.sqrt(0)
     max_sqrt = np.sqrt(275993741)
 
-    normalized_radius = ((sqrt_visitors - min_sqrt) / (max_sqrt - min_sqrt)) * (max_radius - min_radius) + min_radius
+    normalized_radius = ((sqrt_visitors - min_sqrt) / (max_sqrt - min_sqrt)) * (
+        max_radius - min_radius
+    ) + min_radius
     return normalized_radius
 
+
 def grab_poi_data(poi_type):
-    df=pd.read_csv("data/"+poi_type+".csv", sep=",")
+    df = pd.read_csv("data/" + poi_type + ".csv", sep=",")
 
     heatmap_layer = pdk.Layer(
         "HeatmapLayer",
         data=df,
         get_position="[Longitude, Latitude]",
         opacity=0.9,
-        radiusPixels=50,     # Adjust the spread of the heat
+        radiusPixels=50,  # Adjust the spread of the heat
     )
     return heatmap_layer
 
+
 def station_selector(display_area):
-    df_dep= pd.read_csv("data/departements-france.csv", sep=",")
+    df_dep = pd.read_csv("data/departements-france.csv", sep=",")
     df_stations = pd.read_csv("data/stations.csv", sep=",")
     df_poi = pd.read_csv("data/station_poi_index.csv", sep=",")
-    st.session_state.selected_department = st.sidebar.selectbox("Choisissez un département:", df_dep["nom_departement"], index = None, placeholder="Filtrage par département")
+    st.session_state.selected_department = st.sidebar.selectbox(
+        "Choisissez un département :",
+        df_dep["nom_departement"],
+        index=None,
+        placeholder="Filtrage par département",
+    )
     if st.session_state.selected_department:
-        dep_number = df_dep[df_dep["nom_departement"] == st.session_state.selected_department]["code_departement"].values[0]
+        dep_number = df_dep[
+            df_dep["nom_departement"] == st.session_state.selected_department
+        ]["code_departement"].values[0]
         filtered_stations = df_stations[df_stations["departement"] == dep_number]
-        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", filtered_stations["name"])
+        st.session_state.selected_station = st.sidebar.selectbox(
+            "Choisissez une gare :", filtered_stations["name"]
+        )
     else:
-        st.session_state.selected_station = st.sidebar.selectbox("Choisissez une gare:", df_stations["name"], index = None, placeholder = "Gares")
+        st.session_state.selected_station = st.sidebar.selectbox(
+            "Choisissez une gare :", df_stations["name"], index=None, placeholder="Gares"
+        )
     if st.session_state.selected_station:
-        station_index = df_stations[df_stations["name"] == st.session_state.selected_station]["station_id"].values[0]
+        station_index = df_stations[
+            df_stations["name"] == st.session_state.selected_station
+        ]["station_id"].values[0]
         poi_list = df_poi[df_poi["station_id"] == station_index]["poi_index"]
-        display_area.write(f"Les points d'intérêt autour de la gare {st.session_state.selected_station} sont : \n{poi_list.values}")
+        display_area.write(
+            f"Les points d'intérêt autour de la gare {st.session_state.selected_station} sont : \n{poi_list.values}"
+        )
 
-def weight_poi_prox(poi_count_20km,poi_count_15km,poi_count_10km,poi_count_5km):
-    weights = {
-        '20km': 0.2,
-        '15km': 0.3,
-        '10km': 0.4,
-        '5km': 0.5
-    }
-    weighted_sum = (weights['20km'] * poi_count_20km +
-                    weights['15km'] * poi_count_15km +
-                    weights['10km'] * poi_count_10km +
-                    weights['5km'] * poi_count_5km)
+
+def weight_poi_prox(poi_count_20km, poi_count_15km, poi_count_10km, poi_count_5km):
+    weights = {"20km": 0.2, "15km": 0.3, "10km": 0.4, "5km": 0.5}
+    weighted_sum = (
+        weights["20km"] * poi_count_20km
+        + weights["15km"] * poi_count_15km
+        + weights["10km"] * poi_count_10km
+        + weights["5km"] * poi_count_5km
+    )
     return weighted_sum
+
 
 def grab_station_proximity_data():
     df = pd.read_csv("data/station_features.csv", sep=",")
-    df["weight_proximity"] = weight_poi_prox(df["poi_count_20km"], df["poi_count_15km"], df["poi_count_10km"], df["poi_count_5km"])
+    df["weight_proximity"] = weight_poi_prox(
+        df["poi_count_20km"],
+        df["poi_count_15km"],
+        df["poi_count_10km"],
+        df["poi_count_5km"],
+    )
 
     heatmap_layer = pdk.Layer(
         "HeatmapLayer",
@@ -251,12 +295,13 @@ def grab_station_proximity_data():
         get_position="[lon, lat]",
         get_weight="weight_proximity",
         opacity=0.9,
-        radiusPixels=100,     # Adjust the spread of the heat
+        radiusPixels=100,  # Adjust the spread of the heat
     )
-    return heatmap_layer    
+    return heatmap_layer
+
 
 def grab_station_data():
-    df= pd.read_csv("data/stations.csv", sep=",")
+    df = pd.read_csv("data/stations.csv", sep=",")
     df["map_radius"] = normalize_visitors(df["visitors"])
 
     scatter_layer = pdk.Layer(
@@ -269,15 +314,17 @@ def grab_station_data():
         get_radius="[map_radius]",  # Radius in meters
         # radius_max_pixels=30,
         # radius_min_pixels=3,
-        radius_units = String("pixels"),
-        pickable=True,     # Allows hovering/clicking
+        radius_units=String("pixels"),
+        pickable=True,  # Allows hovering/clicking
     )
     return scatter_layer
+
 
 def main():
     display_area = st.empty()
     map_selector(display_area)
     # station_selector(display_area)
+
 
 if __name__ == "__main__":
     main()
