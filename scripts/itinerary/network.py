@@ -99,6 +99,9 @@ def build_footpaths(stations):
                 footpaths[b].append((a, seconds, "walk"))
 
     # local public transport between SNCF stations of the same city (one row per direction)
+    if not STATION_TRANSFERS_CSV.exists():  # not built yet (build_all_data.py --skip-transfers)
+        print(f"[warn] {STATION_TRANSFERS_CSV.name} not found: walking only between stations")
+        return footpaths
     transfers = pd.read_csv(STATION_TRANSFERS_CSV, dtype={"from_uic": str, "to_uic": str})
     for row in transfers.itertuples():
         a, b = "StopArea:OCE" + row.from_uic, "StopArea:OCE" + row.to_uic
