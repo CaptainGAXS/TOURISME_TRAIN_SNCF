@@ -75,6 +75,7 @@ def attach_riderships(st_uic, f):
     # Back to one row per station (sum the visitors of all its UIC codes)
     return merged.groupby("station_id", as_index=False).agg(
         name=("name", "first"),
+        uic=("uic", lambda s: ";".join(s.dropna())),  # to find the station in the GTFS timetable
         lat=("lat", "first"),
         lon=("lon", "first"),
         departement=("departement", "first"),

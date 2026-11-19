@@ -6,6 +6,7 @@ import numpy as np  # type: ignore
 
 from show_map import render_map
 from scripts.itinerary.itinerary_ui import itinerary_sidebar,date_time_inputs, journey_panel
+from scripts.itinerary.network import uic_to_station_id
 from scripts.research.recommender import RecommendationCriteria, TourismRecommender, get_top_pois_for_recommendations
 from scripts.research.station_features import load_pois
 from datetime import date, time, timedelta
@@ -93,6 +94,14 @@ def destination_recommender_ui():
                     # Format the distance
                     display_pois["distance_km"] = display_pois["distance_km"].round(1).astype(str) + " km"
                     
+                    # Internal category codes -> same labels as the preference sliders
+                    display_pois["category"] = display_pois["category"].replace({
+                        "hpoi": "Culture",
+                        "npoi": "Nature",
+                        "epoi": "Événements",
+                        "attraction": "Attractions",
+                    })
+
                     # Clean up missing websites for a better display
                     display_pois["Site internet"] = display_pois["Site internet"].fillna("-")
                     
@@ -100,7 +109,7 @@ def destination_recommender_ui():
                     display_pois.rename(columns={
                         "category": "Catégorie", 
                         "distance_km": "Distance",
-                        "Site internet": "Site Web"
+                        "Site internet": "Site web"
                     }, inplace=True)
                     
                     # Display as a clean table on the main screen
@@ -109,7 +118,7 @@ def destination_recommender_ui():
                         hide_index=True, 
                         use_container_width=True,
                         column_config={
-                            "Site Web": st.column_config.LinkColumn("Site Web")
+                            "Site web": st.column_config.LinkColumn("Site web")
                         }
                     )
                 else:
@@ -139,13 +148,13 @@ def map_selector(display_area):
         layers.append(scatter_layer)
 
     heatmap_choice = st.sidebar.radio(
-        "Cartes de chaleur:",
+        "Cartes de chaleur :",
         [
             "Aucune",
             "POI naturels",
             "POI historiques",
-            "POI évenementiels",
-            "Parcs d'attraction",
+            "POI événementiels",
+            "Parcs d'attractions",
             "Gares et proximité de POI",
         ],
     )
@@ -155,10 +164,10 @@ def map_selector(display_area):
     if heatmap_choice == "POI historiques":
         heatmap_layer = grab_poi_data("hpoi")
         layers = [heatmap_layer] + layers
-    if heatmap_choice == "POI évenementiels":
+    if heatmap_choice == "POI événementiels":
         heatmap_layer = grab_poi_data("epoi")
         layers = [heatmap_layer] + layers
-    if heatmap_choice == "Parcs d'attraction":
+    if heatmap_choice == "Parcs d'attractions":
         heatmap_layer = grab_poi_data("attractions_france")
         layers = [heatmap_layer] + layers
     if heatmap_choice == "Gares et proximité de POI":
@@ -171,12 +180,20 @@ def map_selector(display_area):
         network, start_seconds = date_time_inputs()
         gtfs_stations = network[0]
 
-        name_to_id = {s["name"]: sid for sid, s in gtfs_stations.items()}
-        origin_id = name_to_id.get(st.session_state.departure_name)
-        destination_id = name_to_id.get(st.session_state.selected_itinerary)
+        # station name -> UIC code -> GTFS station (names differ, e.g. "Paris Gare de Lyon Hall 1 - 2")
+        stations_df = pd.read_csv("data/stations.csv", dtype={"uic": "string"})
+        name_to_uic = dict(zip(stations_df["name"], stations_df["uic"]))
+        origin_id = uic_to_station_id(
+            name_to_uic.get(st.session_state.departure_name), gtfs_stations
+        )
+        destination_id = uic_to_station_id(
+            name_to_uic.get(st.session_state.selected_itinerary), gtfs_stations
+        )
 
         if origin_id and destination_id:
             map_layers = journey_panel(network, origin_id, destination_id, start_seconds)
+        else:
+            st.sidebar.warning("Pas de train SNCF pour cette gare.")
 
     layers = layers + map_layers # + itinerary_sidebar()
 
@@ -225,7 +242,7 @@ def station_selector(display_area):
     df_stations = pd.read_csv("data/stations.csv", sep=",")
     df_poi = pd.read_csv("data/station_poi_index.csv", sep=",")
     st.session_state.selected_department = st.sidebar.selectbox(
-        "Choisissez un département:",
+        "Choisissez un département :",
         df_dep["nom_departement"],
         index=None,
         placeholder="Filtrage par département",
@@ -236,11 +253,11 @@ def station_selector(display_area):
         ]["code_departement"].values[0]
         filtered_stations = df_stations[df_stations["departement"] == dep_number]
         st.session_state.selected_station = st.sidebar.selectbox(
-            "Choisissez une gare:", filtered_stations["name"]
+            "Choisissez une gare :", filtered_stations["name"]
         )
     else:
         st.session_state.selected_station = st.sidebar.selectbox(
-            "Choisissez une gare:", df_stations["name"], index=None, placeholder="Gares"
+            "Choisissez une gare :", df_stations["name"], index=None, placeholder="Gares"
         )
     if st.session_state.selected_station:
         station_index = df_stations[

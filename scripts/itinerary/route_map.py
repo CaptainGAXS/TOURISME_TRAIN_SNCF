@@ -4,9 +4,9 @@ deck = pdk.Deck(layers=[other_layer] + journey_layers(legs, stations, trips), ..
 """
 
 try:
-    from .planner import hhmm, leg_stations
+    from .planner import hhmm, leg_stations, mode_name
 except ImportError:
-    from planner import hhmm, leg_stations
+    from planner import hhmm, leg_stations, mode_name
 import pandas as pd
 import pydeck as pdk
 
@@ -34,7 +34,8 @@ def journey_layers(legs, stations, trips):
     for leg in legs:
         ids = leg_stations(leg, trips)
         if leg["mode"] != "train":  # "walk", "metro/RER", "tram", "bus"...
-            color, title = LOCAL_COLOR, leg["mode"].capitalize()
+            name = mode_name(leg["mode"])
+            color, title = LOCAL_COLOR, name[0].upper() + name[1:]  # "À pied", "Métro/RER"
         else:
             kind = trips[leg["trip"]]["kind"]
             color, title = COLORS.get(kind, OTHER_COLOR), f"{kind} {trips[leg['trip']]['number']}"
@@ -44,7 +45,7 @@ def journey_layers(legs, stations, trips):
             {
                 "path": [[stations[s]["lon"], stations[s]["lat"]] for s in ids],
                 "color": color,
-                "name": f"{title}: {start} {hhmm(leg['dep'])} → {end} {hhmm(leg['arr'])}",
+                "name": f"{title} : {start} {hhmm(leg['dep'])} → {end} {hhmm(leg['arr'])}",
             }
         )
         for s in ids[1:-1]:  # stations where the train stops but we stay on board
@@ -59,7 +60,7 @@ def journey_layers(legs, stations, trips):
             {
                 "lon": stations[leg["from"]]["lon"],
                 "lat": stations[leg["from"]]["lat"],
-                "name": f"{start} — dep {hhmm(leg['dep'])}",
+                "name": f"{start} — dép. {hhmm(leg['dep'])}",
             }
         )
 
@@ -68,7 +69,7 @@ def journey_layers(legs, stations, trips):
         {
             "lon": stations[last["to"]]["lon"],
             "lat": stations[last["to"]]["lat"],
-            "name": f"{stations[last['to']]['name']} — arr {hhmm(last['arr'])}",
+            "name": f"{stations[last['to']]['name']} — arr. {hhmm(last['arr'])}",
         }
     )
 
