@@ -8,11 +8,12 @@ import sys
 import unicodedata
 
 try:
-    from .network import load_network
+    from .network import distance_m, load_network
 except ImportError:
-    from network import load_network
+    from network import distance_m, load_network
 
 TRANSFER_SECONDS = 10 * 60  # minimum time to change trains
+SAME_CITY_METERS = 5000  # meeting_points: one station per city (like the recommender)
 
 
 def simplify(text):
@@ -144,6 +145,48 @@ def travel_times(network, origin, start_time):
     return {station: t - start_time for station, t in arrival.items()}
 
 
+def return_trip(network, origin, destination, arrival, latest_home):
+    """Day trip: the last journey back destination -> origin leaving after `arrival`
+    (when we arrived) and arriving by `latest_home`. None if there is no such journey."""
+    stations, connections, trips, footpaths = network
+    best = None
+    t = arrival
+    while True:  # journeys leaving later and later, until they arrive too late
+        legs = earliest_arrival(connections, footpaths, destination, origin, t)
+        if legs is None or legs[-1]["arr"] > latest_home:
+            return best
+        best = legs
+        t = legs[0]["dep"] + 60
+
+
+def meeting_points(network, origins, start_time, candidates=None, n=5):
+    """Where can people leaving from `origins` meet? Stations reachable by everyone, sorted by
+    the longest trip (the last person to arrive), then by the total travel time.
+    Only the best station of each city (stations closer than SAME_CITY_METERS).
+    Returns [(station_id, [seconds for each origin]), ...] (n best)."""
+    stations = network[0]
+    times = [travel_times(network, origin, start_time) for origin in origins]
+    common = set.intersection(*(set(t) for t in times))
+    if candidates is not None:
+        common &= set(candidates)
+    ranked = sorted(
+        common, key=lambda s: (max(t[s] for t in times), sum(t[s] for t in times))
+    )
+
+    best = []
+    for s in ranked:
+        a = stations[s]
+        if all(
+            distance_m(a["lat"], a["lon"], stations[b]["lat"], stations[b]["lon"])
+            > SAME_CITY_METERS
+            for b in best
+        ):
+            best.append(s)
+        if len(best) == n:
+            break
+    return [(s, [t[s] for t in times]) for s in best]
+
+
 def leg_stations(leg, trips):
     """Stations passed by a leg, in order (for walking / metro: just start and end)."""
     if leg["mode"] != "train":
@@ -159,6 +202,10 @@ def leg_stations(leg, trips):
 
 def hhmm(seconds):  # seconds -> "HH:MM" string
     return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
+
+
+def duration_text(seconds):  # seconds -> "1h02" (a duration, not a time of day)
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}"
 
 
 # modes of the non-train legs (network.py, data/station_transfers.csv) -> French for display

@@ -4,9 +4,9 @@ deck = pdk.Deck(layers=[other_layer] + journey_layers(legs, stations, trips), ..
 """
 
 try:
-    from .planner import hhmm, leg_stations, mode_name
+    from .planner import duration_text, hhmm, leg_stations, mode_name
 except ImportError:
-    from planner import hhmm, leg_stations, mode_name
+    from planner import duration_text, hhmm, leg_stations, mode_name
 import pandas as pd
 import pydeck as pdk
 
@@ -23,9 +23,46 @@ COLORS = {
 OTHER_COLOR = [90, 60, 160]  # ICE, Lyria, ...
 LOCAL_COLOR = [130, 130, 130]  # walk, metro, tram, bus between stations of the same city
 
+# travel time -> color: (up to this many hours, color, label for the legend)
+TIME_COLORS = [
+    (1, [40, 160, 70], "🟢 < 1h"),
+    (2, [240, 200, 0], "🟡 1-2h"),
+    (3, [245, 130, 30], "🟠 2-3h"),
+    (float("inf"), [215, 40, 40], "🔴 > 3h"),
+]
+
 
 # def hhmm(seconds):
 #     return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
+
+
+def reachable_layer(times, stations, max_seconds):
+    """Stations reachable within max_seconds, colored by travel time (TIME_COLORS).
+    times: {station_id: seconds}, from planner.travel_times()"""
+    dots = []
+    for s, seconds in times.items():
+        if seconds > max_seconds:
+            continue
+        color = next(c for hours, c, _ in TIME_COLORS if seconds < hours * 3600)
+        dots.append(
+            {
+                "lon": stations[s]["lon"],
+                "lat": stations[s]["lat"],
+                "name": f"{stations[s]['name']} — {duration_text(seconds)}",
+                "color": color,
+            }
+        )
+    return pdk.Layer(
+        "ScatterplotLayer",
+        data=pd.DataFrame(dots, columns=["lon", "lat", "name", "color"]),
+        get_position="[lon, lat]",
+        get_fill_color="color",
+        get_line_color=[255, 255, 255],
+        stroked=True,
+        line_width_min_pixels=1,
+        radius_min_pixels=5,
+        pickable=True,
+    )
 
 
 def journey_layers(legs, stations, trips):

@@ -7,7 +7,15 @@ import pydeck as pdk
 import streamlit as st
 from pydeck.types import String
 
-from scripts.itinerary.itinerary_ui import date_time_inputs, journey_panel
+from scripts.itinerary.itinerary_ui import (
+    date_time_inputs,
+    day_trip_panel,
+    journey_panel,
+    meeting_sidebar,
+    meeting_tab,
+    reachable_panel,
+    trip_summaries,
+)
 from scripts.itinerary.network import uic_to_station_id
 from scripts.research.recommender import (
     RecommendationCriteria,
@@ -23,6 +31,7 @@ NUMBER_POI_SHOW = 20
 NAME_TAB_1 = "Carte & Exploration"
 NAME_TAB_2 = "Destinations recommandées"
 NAME_TAB_3 = "Itinéraire & CO₂"
+NAME_TAB_4 = "Où se retrouver ?"
 
 st.set_page_config(
     page_title=NAME_APP,
@@ -236,6 +245,7 @@ def render_recommender_section():
                         st.session_state.reco_results = results
                         st.session_state.reco_pois = top_pois
                         st.session_state.departure_name = departure
+                        st.session_state.travel_date = event_date
                         st.session_state.selected_itinerary = None
                         # Full app rerun so the map and tabs update with new results
                         st.rerun(scope="app")
@@ -277,6 +287,9 @@ def render_sidebar():
     with st.sidebar:
         render_recommender_section()
 
+    reachable_layers = reachable_panel(st.sidebar.expander("Où aller en train ?"))
+    meeting_sidebar(st.sidebar.expander(NAME_TAB_4))
+
     layers = []
     heatmap_map = {
         "POI naturels": "npoi",
@@ -289,6 +302,8 @@ def render_sidebar():
 
     if show_stations:
         layers.append(grab_station_data())
+
+    layers += reachable_layers
 
     if "reco_results" in st.session_state:
         layers.append(grab_recommended_stations_layer(st.session_state.reco_results))
@@ -316,6 +331,9 @@ def render_recommendations_tab():
     departure = st.session_state.departure_name
 
     st.subheader(f"Top {len(results)} destinations au départ de {departure}")
+    travel_date = st.session_state.get("travel_date", date.today())
+    trips_text = trip_summaries(departure, results["name"], travel_date)
+    st.caption(f"Train : premier trajet le {travel_date:%d/%m/%Y} après 07:00.")
 
     for idx, (_, station) in enumerate(results.iterrows()):
         with st.container(border=True):
@@ -325,6 +343,7 @@ def render_recommendations_tab():
                     f"### {idx + 1}. {station['name']} "
                     f"— `{station['distance_from_departure_km']:.0f} km`"
                 )
+                st.caption(f"Train : {trips_text[station['name']]}")
             with col_btn:
                 st.button(
                     "Voir les trains",
@@ -402,9 +421,13 @@ def render_itinerary_tab():
 
     if origin_id and destination_id:
         with col_results:
-            return journey_panel(
+            route_layers = journey_panel(
                 network, origin_id, destination_id, start_seconds, container=col_results
             )
+            day_trip_panel(
+                network, origin_id, destination_id, start_seconds, container=col_results
+            )
+            return route_layers
 
     col_results.warning("Pas de train SNCF trouvé pour cette destination.")
     return []
@@ -430,9 +453,10 @@ def main():
 
     has_reco = "reco_results" in st.session_state
     has_itin = bool(st.session_state.get("selected_itinerary"))
+    has_meet = "meeting" in st.session_state
 
     # Show only the map (no empty tab bar) until a search is made
-    if not has_reco and not has_itin:
+    if not has_reco and not has_itin and not has_meet:
         render_map(st.container(), mappath, base_layers)
         return
 
@@ -441,6 +465,8 @@ def main():
         tab_labels.append(NAME_TAB_2)
     if has_itin:
         tab_labels.append(NAME_TAB_3)
+    if has_meet:
+        tab_labels.append(NAME_TAB_4)
 
     tabs = st.tabs(tab_labels)
     tab_by_label = dict(zip(tab_labels, tabs))
@@ -449,6 +475,10 @@ def main():
     if has_itin:
         with tab_by_label[NAME_TAB_3]:
             route_layers = render_itinerary_tab()
+
+    if has_meet:
+        with tab_by_label[NAME_TAB_4]:
+            route_layers += meeting_tab()
 
     if has_reco:
         with tab_by_label[NAME_TAB_2]:
