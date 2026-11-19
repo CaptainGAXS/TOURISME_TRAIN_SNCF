@@ -31,11 +31,11 @@ except ImportError:
 
 
 def co2_text(kg):
-    """1.2845 -> '1.28 kgCO2e'"""
-    return f"{kg:.2f} kgCO2e"
+    """1.2845 -> '1,28 kg CO2e' (French decimal comma)"""
+    return f"{kg:.2f}".replace(".", ",") + " kg CO2e"
 
 
-@st.cache_resource(show_spinner="Loading timetable (about 10 s)...")
+@st.cache_resource(show_spinner="Chargement des horaires (environ 10 s)...")
 def get_network(day):
     """Loaded once per date, then reused (Streamlit reruns the script on every click)."""
     return load_network(day)
@@ -46,7 +46,7 @@ def date_time_inputs(container=st.sidebar):
     day = container.date_input(
         "Date", date.today() + timedelta(days=1), key="itin_date"
     )
-    start = container.time_input("Departure after", time(7, 0), key="itin_time")
+    start = container.time_input("Départ après", time(7, 0), key="itin_time")
     network = get_network(day.strftime("%Y%m%d"))
     return network, start.hour * 3600 + start.minute * 60
 
@@ -59,7 +59,7 @@ def journey_panel(network, origin, destination, start_seconds, container=st.side
     # ---- search
     journeys = plan(network, origin, destination, start_seconds, n=5)
     if not journeys:
-        container.warning("No journey found.")
+        container.warning("Aucun trajet trouvé.")
         return []
 
     # ---- choose one journey
@@ -69,7 +69,7 @@ def journey_panel(network, origin, destination, start_seconds, container=st.side
         for legs in journeys
     ]
     choice = container.radio(
-        "Journeys",
+        "Trajets",
         range(len(journeys)),
         format_func=lambda i: summaries[i],
         key="itin_choice",
@@ -86,13 +86,15 @@ def journey_panel(network, origin, destination, start_seconds, container=st.side
     train_kg = journey_co2(legs, stations, trips)
     car_kg = car_co2(origin, destination, stations)
     lines.append("")
-    lines.append(f"Total (train): {co2_text(train_kg)}")
-    car_line = f"Car (petrol, 2.2 pers.): {co2_text(car_kg)}"
+    lines.append(f"Total (train) : {co2_text(train_kg)}")
+    car_line = f"Voiture (essence, 2,2 pers.) : {co2_text(car_kg)}"
     if train_kg > 0:  # 0 when the journey is only walking
         car_line += f"  (x{car_kg / train_kg:.0f})"
     lines.append(car_line)
     container.code("\n".join(lines), language=None)
-    container.caption("Estimated CO2e per traveller (SNCF factors per km x distance).")
+    container.caption(
+        "Estimation du CO2e par voyageur (facteurs SNCF par km x distance)."
+    )
 
     return journey_layers(legs, stations, trips)
 
@@ -106,10 +108,10 @@ def itinerary_sidebar(container=st.sidebar):
     name_to_id = {s["name"]: sid for sid, s in stations.items()}
     names = sorted(name_to_id)
     origin = container.selectbox(
-        "From", names, index=names.index("Nancy"), key="itin_from"
+        "Départ", names, index=names.index("Nancy"), key="itin_from"
     )
     destination = container.selectbox(
-        "To", names, index=names.index("Paris Est"), key="itin_to"
+        "Arrivée", names, index=names.index("Paris Est"), key="itin_to"
     )
     return journey_panel(
         network, name_to_id[origin], name_to_id[destination], start_seconds, container

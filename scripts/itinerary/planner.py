@@ -161,6 +161,19 @@ def hhmm(seconds):  # seconds -> "HH:MM" string
     return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
 
 
+# modes of the non-train legs (network.py, data/station_transfers.csv) -> French for display
+MODE_NAMES = {
+    "walk": "à pied",
+    "metro/RER": "métro/RER",
+    "metro/tram": "métro/tram",
+    "local transit": "transports urbains",
+}
+
+
+def mode_name(mode):  # "walk" -> "à pied" (unknown modes, e.g. "tram", "bus", "TCL": unchanged)
+    return MODE_NAMES.get(mode, mode)
+
+
 def describe(legs, stations, trips):  # legs -> text lines (display)
     """Journey as text lines."""
     duration = legs[-1]["arr"] - legs[0]["dep"]
@@ -169,12 +182,12 @@ def describe(legs, stations, trips):  # legs -> text lines (display)
     )  # 0 if walking only
     lines = [
         f"{hhmm(legs[0]['dep'])} -> {hhmm(legs[-1]['arr'])}  "
-        f"({duration // 3600}h{duration % 3600 // 60:02d}, {changes} transfer(s))"
+        f"({duration // 3600}h{duration % 3600 // 60:02d}, {changes} correspondance(s))"
     ]
     for leg in legs:
         start, end = stations[leg["from"]]["name"], stations[leg["to"]]["name"]
         if leg["mode"] != "train":  # "walk" or "metro/RER"
-            what = f"{leg['mode']} {(leg['arr'] - leg['dep']) // 60} min"
+            what = f"{mode_name(leg['mode'])} {(leg['arr'] - leg['dep']) // 60} min"
         else:
             what = f"{trips[leg['trip']]['kind']} {trips[leg['trip']]['number']}"
         lines.append(
