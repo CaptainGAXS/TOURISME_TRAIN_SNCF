@@ -88,21 +88,23 @@ def weight_poi_prox(poi_count_20km, poi_count_15km, poi_count_10km, poi_count_5k
         + 0.5 * poi_count_5km
     )
 
-
 def grab_poi_data(poi_type: str):
-    df = get_poi_csv(poi_type)
-    return pdk.Layer(
-        "HeatmapLayer",
-        data=df,
-        get_position="[Longitude, Latitude]",
-        opacity=0.85,
-        radiusPixels=50,
-    )
+    df = get_poi_csv(poi_type)[["Longitude", "Latitude"]]  # Drop text/URL columns
+    return pdk.Layer("HeatmapLayer", data=df, get_position="[Longitude, Latitude]", opacity=0.85, radiusPixels=50)
 
-
+def grab_station_proximity_data():
+    df = get_station_features()
+    plot_df = pd.DataFrame({
+        "lon": df["lon"],
+        "lat": df["lat"],
+        "weight_proximity": weight_poi_prox(
+            df["poi_count_20km"], df["poi_count_15km"], df["poi_count_10km"], df["poi_count_5km"]
+        ),
+    })
+    return pdk.Layer("HeatmapLayer", data=plot_df, get_position="[lon, lat]", get_weight="weight_proximity", opacity=0.85, radiusPixels=100)
 
 def grab_station_data():
-    df = get_stations_df().copy()
+    df = get_stations_df()[["name", "lon", "lat", "visitors"]].copy()
     df["map_radius"] = normalize_visitors(df["visitors"])
     return pdk.Layer(
         "ScatterplotLayer",
@@ -115,7 +117,6 @@ def grab_station_data():
         radius_units=String("pixels"),
         pickable=True,
     )
-
 
 def grab_recommended_stations_layer(results_df: pd.DataFrame):
     df = results_df.copy()
