@@ -35,7 +35,7 @@ def co2_text(kg):
     return f"{kg:.2f}".replace(".", ",") + " kg CO2e"
 
 
-@st.cache_resource(show_spinner="Chargement des horaires (environ 10 s)...")
+@st.cache_resource(show_spinner="Chargement des horaires...")
 def get_network(day):
     """Loaded once per date, then reused (Streamlit reruns the script on every click)."""
     return load_network(day)
@@ -87,7 +87,7 @@ def journey_panel(network, origin, destination, start_seconds, container=st.side
     car_kg = car_co2(origin, destination, stations)
     lines.append("")
     lines.append(f"Total (train) : {co2_text(train_kg)}")
-    car_line = f"Voiture (essence, 2,2 pers.) : {co2_text(car_kg)}"
+    car_line = f"Voiture : {co2_text(car_kg)}"
     if train_kg > 0:  # 0 when the journey is only walking
         car_line += f"  (x{car_kg / train_kg:.0f})"
     lines.append(car_line)

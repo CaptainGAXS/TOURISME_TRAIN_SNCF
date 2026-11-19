@@ -1,6 +1,7 @@
 # Tourisme Train SNCF
 
 Projet d'exploitation de données ferroviaires et touristiques en France.
+L'objectif est de proposer des recommandations de destinations touristiques à partir d'une gare de départ, en utilisant les données de fréquentation des gares SNCF et les points d'intérêt touristiques.
 
 ## Installation
 
@@ -28,7 +29,7 @@ python -m pip install -r requirements.txt
 ## Préparer les données
 
 Les données déjà préparées se trouvent dans [`data/`](data/). Pour télécharger les
-fichiers sources et reconstruire les données, consulter
+fichiers sources et reconstruire les données (afin d'avoir les dernières versions), consulter
 [`scripts/data_prep/DATA.md`](scripts/data_prep/DATA.md), puis exécuter les
 commandes indiquées depuis la racine du projet.
 
@@ -40,6 +41,10 @@ En particulier, ce document explique comment :
 - générer les fichiers de points d'intérêt (`attractions_france.csv`,
   `hpoi.csv`, `npoi.csv` et `epoi.csv`) avec
   `pre-traitement-tourism.py`.
+- reconstruire le fichier [`data/station_transfers.csv`](data/station_transfers.csv) avec `build_station_transfers.py` ;
+- télécharger le fichier GTFS de la SNCF pour le planificateur d'itinéraire
+- construire station_poi_index.csv et poi_nearest_station.csv avec `build_proximity_indexes.py`.
+- construire les features gare-POI avec `station_features.py`.
 
 Les identifiants utilisés pendant la préparation sont lus comme du texte afin
 de conserver leurs zéros initiaux.
@@ -49,62 +54,13 @@ de conserver leurs zéros initiaux.
 Avec l'environnement virtuel activé :
 
 ```bash
-python main.py
+streamlit run main.py
 ```
 
 Pour quitter l'environnement virtuel :
 
 ```bash
 deactivate
-```
-
-Pour calculer les distances entre les gares et les POI avec `BallTree` :
-
-```bash
-python scripts/research/station_features.py
-```
-
-Le fichier [`data/station_features.csv`](data/station_features.csv) contient les
-compteurs de POI à moins de 20, 15, 10, 5, 3 et 1 km, ainsi que la distance du
-POI le plus proche, pour chaque gare.
-
-Pour récupérer la liste des POI proches d'une gare :
-
-```python
-from station_features import find_nearby_pois, load_pois, load_stations
-
-nearby = find_nearby_pois(
-    load_stations(),
-    load_pois(),
-    station_name="Paris Austerlitz",
-    radius_km=3,
-)
-print(nearby[["distance_km", "Nom", "category"]])
-```
-
-Pour éviter de reconstruire l'index spatial à chaque recherche :
-
-```bash
-python scripts/research/build_proximity_indexes.py
-```
-
-Cette commande crée `data/station_poi_index.csv`, qui contient les liens
-gare-POI jusqu'à 20 km, et `data/poi_nearest_station.csv`, qui contient la
-gare la plus proche de chaque POI. La recherche peut ensuite utiliser
-`find_nearby_pois_from_index`. Exemple :
-
-```python
-from station_features import find_nearby_pois_from_index, load_pois, load_stations
-import pandas as pd
-
-nearby = find_nearby_pois_from_index(
-    load_stations(),
-    load_pois(),
-    pd.read_csv("data/station_poi_index.csv"),
-    station_name="Paris Austerlitz",
-    radius_km=1,
-)
-print(nearby[["distance_km", "Nom", "category"]])
 ```
 
 ## Recommandations personnalisées
@@ -124,7 +80,7 @@ stations = pd.read_csv("data/station_features.csv")
 recommender = TourismRecommender().fit(stations)
 recommendations = recommender.recommend(
     RecommendationCriteria(
-        culture=0.8,
+        patrimoine=0.8,
         nature=0.2,
         events=0,
         attractions=0,
@@ -148,46 +104,41 @@ fréquentation de la gare. `max_distance_km` limite la recherche autour de la
 gare de départ. Pour rechercher dans toute la France, renseigner la gare de
 départ sans fournir `max_distance_km`. `exclude_ile_de_france=True` retire les
 destinations des départements 75, 77, 78, 91, 92, 93, 94 et 95.
-`favor_poi_with_website=True` utilise des compteurs pondérés dans lesquels un
-POI possédant une adresse de site internet compte 3 fois plus qu'un POI sans
-site. Cette option peut être désactivée avec `False`.
+Un POI possédant une adresse de site internet compte 3 fois plus qu'un POI sans
+site.
 
-Pour récupérer les cinq POI principaux associés à chaque gare recommandée :
-
-```python
-from scripts.research.recommender import get_top_pois_for_recommendations
-from scripts.research.station_features import load_pois
-
-pois = load_pois()
-station_poi_index = pd.read_csv("data/station_poi_index.csv")
-
-top_pois = get_top_pois_for_recommendations(
-    recommendations,
-    criteria,
-    pois,
-    station_poi_index,
-    n_pois=5,
-)
-
-print(top_pois[
-    ["station_name", "Nom", "category", "distance_km",
-     "attractivity_score"]
-])
-```
 
 ## Structure principale
 
 ```text
 .
 ├── main.py                         # Point d'entrée
-├── best_poi.py                      # Traitement des points d'intérêt
-├── station_features.py              # Calcul des features gare-POI
-├── scripts/
-│   └── research/
-│       ├── build_proximity_indexes.py       # Construction des index spatiaux
-│       ├── recommender.py                   # Recommandations et clustering
-│       └── station_features.py              # Calcul des features gare-POI
+├── poi.py                          # Catégories de points d'intérêt
+├── show_map.py                     # Rendu cartographique
 ├── requirements.txt                # Dépendances Python
-├── data/                            # Données préparées
-└── scripts/data_prep/DATA.md       # Téléchargement et préparation des données
+├── scripts/
+│   ├── data_prep/
+│   │   ├── DATA.md                 # Sources et commandes de préparation
+│   │   ├── build_stations.py       # Construction des gares
+│   │   ├── build_station_transfers.py
+│   │   └── pre-traitement-tourism.py
+│   ├── itinerary/
+│   │   ├── carbon.py               # Calcul des émissions carbone
+│   │   ├── itinerary_ui.py         # Interface du trajet
+│   │   ├── network.py              # Chargement du réseau SNCF
+│   │   ├── planner.py              # Recherche d'itinéraires
+│   │   └── route_map.py            # Carte des itinéraires
+│   └── research/
+│       ├── recommender.py          # Recommandations et clustering
+│       └── station_features.py     # Features gare-POI et index spatiaux
+└── data/
+    ├── raw/                        # Sources téléchargées
+    ├── stations.csv                # Liste des gares
+    ├── station_features.csv        # Features touristiques des gares
+    ├── station_poi_index.csv       # Liens gare-POI
+    ├── poi_nearest_station.csv     # Gare la plus proche de chaque POI
+    ├── hpoi.csv                   # Points culturels
+    ├── npoi.csv                   # Points naturels
+    ├── epoi.csv                   # Événements datés
+    └── attractions_france.csv      # Attractions
 ```

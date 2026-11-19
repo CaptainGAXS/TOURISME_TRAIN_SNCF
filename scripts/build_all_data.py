@@ -32,6 +32,7 @@ DOWNLOADS = {
     TRANSIT / "clermont_t2c.zip": "https://www.data.gouv.fr/api/1/datasets/r/4e237a58-cd14-4746-b729-1337a40a8a7b",
     TRANSIT / "macon_trema.zip": "https://www.data.gouv.fr/api/1/datasets/r/0a01b036-796f-43a3-9c64-a2f6024427b0",
     TRANSIT / "aix_marseille.zip": "https://www.data.gouv.fr/api/1/datasets/r/0d9a808a-9a9b-4fa1-b04f-339bbf2cfeb1",
+    RAW / "evenements-agenda.csv": "https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/evenements-publics-openagenda/exports/csv/?delimiter=%3B&lang=fr&timezone=Europe%2FParis&use_labels=true",
 }
 
 

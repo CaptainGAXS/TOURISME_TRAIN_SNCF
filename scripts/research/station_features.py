@@ -10,13 +10,13 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Fichiers sources des points d'intérêt (POI) par catégorie
 POI_FILES = {
-    "hpoi": ROOT / "data" / "hpoi.csv",               # Culture / patrimoine
+    "hpoi": ROOT / "data" / "hpoi.csv",               # Patrimoine / patrimoine
     "npoi": ROOT / "data" / "npoi.csv",               # Nature
     "epoi": ROOT / "data" / "epoi.csv",               # Événements
     "attraction": ROOT / "data" / "attractions_france.csv",  # Attractions
 }
 
-# Rayons de recherche autour des gares (2 km remplace 3 km et 1 km)
+# Rayons de recherche autour des gares
 RADIUSES_KM = (20, 15, 10, 5, 2)
 EARTH_RADIUS_KM = 6371.0088
 
@@ -35,8 +35,10 @@ def load_pois() -> pd.DataFrame:
         if missing:
             raise ValueError(f"{path} : colonnes manquantes -> {', '.join(sorted(missing))}")
 
-        # Sélection et renommage des colonnes utiles
-        poi = poi[["Nom", "Identifiant", "Latitude", "Longitude", "Site internet"]].rename(
+        # Conserve les dates des événements pour permettre un filtrage par date.
+        columns = ["Nom", "Identifiant", "Latitude", "Longitude", "Site internet"]
+        columns.extend(column for column in ("Date début", "Date fin") if column in poi)
+        poi = poi[columns].rename(
             columns={"Latitude": "lat", "Longitude": "lon"}
         )
         poi["lat"] = pd.to_numeric(poi["lat"], errors="coerce")

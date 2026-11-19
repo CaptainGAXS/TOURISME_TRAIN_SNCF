@@ -1,3 +1,6 @@
+from datetime import date
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pydeck as pdk
@@ -13,12 +16,16 @@ from scripts.research.recommender import (
 )
 from scripts.research.station_features import load_pois
 from show_map import render_map
-from pathlib import Path
 
 HELP_PATH = Path(__file__).parent / "data/help_button.md"
+NAME_APP = "Tourisme en Train en France"
+NUMBER_POI_SHOW = 20
+NAME_TAB_1 = "Carte & Exploration"
+NAME_TAB_2 = "Destinations recommandées"
+NAME_TAB_3 = "Itinéraire & CO₂"
 
 st.set_page_config(
-    page_title="Tourisme Train SNCF",
+    page_title=NAME_APP,
     layout="wide",
 )
 
@@ -93,23 +100,6 @@ def grab_poi_data(poi_type: str):
     )
 
 
-def grab_station_proximity_data():
-    df = get_station_features().copy()
-    df["weight_proximity"] = weight_poi_prox(
-        df["poi_count_20km"],
-        df["poi_count_15km"],
-        df["poi_count_10km"],
-        df["poi_count_5km"],
-    )
-    return pdk.Layer(
-        "HeatmapLayer",
-        data=df,
-        get_position="[lon, lat]",
-        get_weight="weight_proximity",
-        opacity=0.85,
-        radiusPixels=100,
-    )
-
 
 def grab_station_data():
     df = get_stations_df().copy()
@@ -150,7 +140,7 @@ def grab_recommended_stations_layer(results_df: pd.DataFrame):
 # ---------------------------------------------------------------------------
 
 PRESETS = {
-    "Culture": (0.7, 0.1, 0.1, 0.1),
+    "Patrimoine": (0.7, 0.1, 0.1, 0.1),
     "Nature": (0.1, 0.7, 0.1, 0.1),
     "Famille": (0.1, 0.2, 0.2, 0.5),
     "Équilibré": (0.25, 0.25, 0.25, 0.25),
@@ -159,7 +149,7 @@ PRESETS = {
 
 def init_state():
     defaults = {
-        "w_culture": 0.25,
+        "w_patrimoine": 0.25,
         "w_nature": 0.25,
         "w_events": 0.25,
         "w_attractions": 0.25,
@@ -185,7 +175,7 @@ def render_recommender_section():
         for i, (label, weights) in enumerate(PRESETS.items()):
             if cols[i % 2].button(label, use_container_width=True):
                 (
-                    st.session_state.w_culture,
+                    st.session_state.w_patrimoine,
                     st.session_state.w_nature,
                     st.session_state.w_events,
                     st.session_state.w_attractions,
@@ -195,15 +185,19 @@ def render_recommender_section():
         # Sliders and inputs inside st.form trigger NO rerun until submitted
         with st.form("recommender_form", border=False):
             departure = st.selectbox("Gare de départ", station_names, index=default_idx)
+            event_date = st.date_input(
+                "Date de départ",
+                value=date.today(),
+            )
             max_distance = st.slider("Distance max (km)", 10.0, 1000.0, 250.0, step=10.0)
             radius_km = st.select_slider(
-                "Rayon autour de la gare (km)",
+                "Distance de déplacement autour de la gare d'arrivée (km)",
                 options=[2, 5, 10, 15, 20],
-                value=10,
+                value=5,
             )
             exclude_paris = st.checkbox("Exclure Paris et l'Île-de-France", value=False)
 
-            weight_culture = st.slider("Culture", 0.0, 1.0, key="w_culture")
+            weight_patrimoine = st.slider("Patrimoine", 0.0, 1.0, key="w_patrimoine")
             weight_nature = st.slider("Nature", 0.0, 1.0, key="w_nature")
             weight_events = st.slider("Événements", 0.0, 1.0, key="w_events")
             weight_attractions = st.slider("Attractions", 0.0, 1.0, key="w_attractions")
@@ -213,11 +207,11 @@ def render_recommender_section():
             )
 
         if submitted:
-            if (weight_culture + weight_nature + weight_events + weight_attractions) == 0:
+            if (weight_patrimoine + weight_nature + weight_events + weight_attractions) == 0:
                 st.error("Veuillez sélectionner au moins une préférence > 0.")
             else:
                 criteria = RecommendationCriteria(
-                    culture=weight_culture,
+                    patrimoine=weight_patrimoine,
                     nature=weight_nature,
                     events=weight_events,
                     attractions=weight_attractions,
@@ -225,6 +219,7 @@ def render_recommender_section():
                     departure_station=departure,
                     max_distance_km=max_distance,
                     exclude_paris=exclude_paris,
+                    event_date=event_date,
                 )
                 with st.spinner("Recherche des meilleures destinations..."):
                     try:
@@ -235,7 +230,7 @@ def render_recommender_section():
                             criteria,
                             get_pois(),
                             get_station_poi_index(),
-                            n_pois=20,
+                            n_pois=NUMBER_POI_SHOW,
                             favor_poi_with_website=recommender.favor_poi_with_website,
                         )
                         st.session_state.reco_results = results
@@ -249,7 +244,7 @@ def render_recommender_section():
 
 
 def render_sidebar():
-    st.sidebar.title("Tourisme Train SNCF")
+    st.sidebar.title(NAME_APP)
 
     # Call the fragment inside the sidebar context
     with st.sidebar:
@@ -276,7 +271,6 @@ def render_sidebar():
                 "POI historiques",
                 "POI événementiels",
                 "Parcs d'attractions",
-                "Gares et proximité de POI",
             ],
         )
 
@@ -292,8 +286,6 @@ def render_sidebar():
     }
     if heatmap_choice in heatmap_map:
         layers.append(grab_poi_data(heatmap_map[heatmap_choice]))
-    elif heatmap_choice == "Gares et proximité de POI":
-        layers.append(grab_station_proximity_data())
 
     if show_stations:
         layers.append(grab_station_data())
@@ -310,7 +302,7 @@ def render_sidebar():
 
 def select_itinerary(station_name: str):
     st.session_state.selected_itinerary = station_name
-    st.toast(f"Itinéraire prêt pour {station_name} — ouvrez l'onglet Itinéraire & CO₂.")
+    st.toast(f"Itinéraire disponible pour {station_name} — ouvrez l'onglet {NAME_TAB_3}.")
 
 def render_recommendations_tab():
     if "reco_results" not in st.session_state:
@@ -356,7 +348,7 @@ def render_recommendations_tab():
                     )
                     display_pois["category"] = display_pois["category"].replace(
                         {
-                            "hpoi": "Culture",
+                            "hpoi": "Patrimoine",
                             "npoi": "Nature",
                             "epoi": "Événements",
                             "attraction": "Attractions",
@@ -388,8 +380,8 @@ def render_recommendations_tab():
 def render_itinerary_tab():
     if not st.session_state.get("selected_itinerary"):
         st.info(
-            "Sélectionnez une destination dans l'onglet **Destinations recommandées** "
-            "en cliquant sur **Voir les trains**."
+            f"Sélectionnez une destination dans l'onglet **{NAME_TAB_2}** "
+            f"en cliquant sur **Voir les trains**."
         )
         return []
 
@@ -414,7 +406,7 @@ def render_itinerary_tab():
                 network, origin_id, destination_id, start_seconds, container=col_results
             )
 
-    col_results.warning("Pas de train SNCF trouvé pour cette paire de gares.")
+    col_results.warning("Pas de train SNCF trouvé pour cette destination.")
     return []
 
 # ---------------------------------------------------------------------------
@@ -444,25 +436,25 @@ def main():
         render_map(st.container(), mappath, base_layers)
         return
 
-    tab_labels = ["Carte & Exploration"]
+    tab_labels = [NAME_TAB_1]
     if has_reco:
-        tab_labels.append("Destinations recommandées")
+        tab_labels.append(NAME_TAB_2)
     if has_itin:
-        tab_labels.append("Itinéraire & CO₂")
+        tab_labels.append(NAME_TAB_3)
 
     tabs = st.tabs(tab_labels)
     tab_by_label = dict(zip(tab_labels, tabs))
 
     route_layers = []
     if has_itin:
-        with tab_by_label["Itinéraire & CO₂"]:
+        with tab_by_label[NAME_TAB_3]:
             route_layers = render_itinerary_tab()
 
     if has_reco:
-        with tab_by_label["Destinations recommandées"]:
+        with tab_by_label[NAME_TAB_2]:
             render_recommendations_tab()
 
-    with tab_by_label["Carte & Exploration"]:
+    with tab_by_label[NAME_TAB_1]:
         render_map(st.container(), mappath, base_layers + route_layers)
 
 
