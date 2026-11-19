@@ -55,13 +55,13 @@ def destination_recommender_ui():
             pois = load_pois()
             station_poi_index = pd.read_csv("data/station_poi_index.csv", dtype={"station_id": "string"})
             
-            # 5. Fetch the Top 10 POIs for these recommendations
+            # 5. Fetch 20 POIs distributed according to the user's preferences
             top_pois = get_top_pois_for_recommendations(
                 results,
                 criteria,
                 pois,
                 station_poi_index,
-                n_pois=10, 
+                n_pois=20,
                 favor_poi_with_website=recommender.favor_poi_with_website
             )
 
