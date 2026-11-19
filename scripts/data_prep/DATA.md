@@ -46,6 +46,7 @@ python scripts/data_prep/build_station_transfers.py
 |---|---|---|---|
 | `station_id` | str | SNCF station ID (UUID, from `Id_Gare`) | `002271ab-2ed4-…` |
 | `name` | str | Station name | `Paris Austerlitz` |
+| `uic` | str | UIC code(s), `;`-separated when there are several. Links the station to the GTFS timetable (`StopArea:OCE{uic}`) | `87547026;87547000` |
 | `lat` | float | Latitude (WGS84) | `48.842285` |
 | `lon` | float | Longitude (WGS84) | `2.364891` |
 | `departement` | str | Département code | `75` |

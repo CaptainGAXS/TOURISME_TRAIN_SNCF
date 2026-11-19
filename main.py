@@ -6,6 +6,7 @@ import numpy as np # type: ignore
 
 from show_map import render_map
 from scripts.itinerary.itinerary_ui import itinerary_sidebar,date_time_inputs, journey_panel
+from scripts.itinerary.network import uic_to_station_id
 from scripts.research.recommender import RecommendationCriteria, TourismRecommender, get_top_pois_for_recommendations
 from scripts.research.station_features import load_pois
 from datetime import date, time, timedelta
@@ -164,12 +165,16 @@ def map_selector(display_area):
         network, start_seconds = date_time_inputs()
         gtfs_stations = network[0]
 
-        name_to_id = {s["name"]: sid for sid, s in gtfs_stations.items()}
-        origin_id = name_to_id.get(st.session_state.departure_name)
-        destination_id = name_to_id.get(st.session_state.selected_itinerary)
+        # station name -> UIC code -> GTFS station (names differ, e.g. "Paris Gare de Lyon Hall 1 - 2")
+        stations_df = pd.read_csv("data/stations.csv", dtype={"uic": "string"})
+        name_to_uic = dict(zip(stations_df["name"], stations_df["uic"]))
+        origin_id = uic_to_station_id(name_to_uic.get(st.session_state.departure_name), gtfs_stations)
+        destination_id = uic_to_station_id(name_to_uic.get(st.session_state.selected_itinerary), gtfs_stations)
 
         if origin_id and destination_id:
             map_layers = journey_panel(network, origin_id, destination_id, start_seconds)
+        else:
+            st.sidebar.warning("Pas de train SNCF pour cette gare.")
 
     layers = layers + map_layers # + itinerary_sidebar()
 
