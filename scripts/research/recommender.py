@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 import unicodedata
 
 import numpy as np
@@ -17,7 +18,7 @@ from scripts.research.station_features import (
 
 # Correspondance entre préférences utilisateur et préfixes des colonnes de POI
 CATEGORY_COLUMNS = {
-    "culture": "hpoi",
+    "patrimoine": "hpoi",
     "nature": "npoi",
     "events": "epoi",
     "attractions": "attraction",
@@ -33,18 +34,19 @@ PARIS_REGION_DEPARTMENTS = frozenset({"75", "77", "78", "91", "92", "93", "94", 
 class RecommendationCriteria:
     """Paramètres de recherche exposés à l'utilisateur."""
 
-    culture: float = 0.25
+    patrimoine: float = 0.25
     nature: float = 0.25
     events: float = 0.25
     attractions: float = 0.25
-    radius_km: int = 10
+    radius_km: int = 5
     departure_station: str | None = None  # Accepte un nom de gare ou un station_id
     max_distance_km: float | None = None
     exclude_paris: bool = False
+    event_date: date | None = None
 
     def __post_init__(self) -> None:
         """Vérifie la cohérence des critères dès leur création."""
-        prefs = (self.culture, self.nature, self.events, self.attractions)
+        prefs = (self.patrimoine, self.nature, self.events, self.attractions)
         if any(p < 0 or p > 1 for p in prefs):
             raise ValueError("Les préférences doivent être comprises entre 0 et 1.")
         if sum(prefs) == 0:
@@ -60,7 +62,7 @@ class RecommendationCriteria:
     def normalized_preferences(self) -> dict[str, float]:
         """Normalise les poids des 4 préférences pour que leur somme vaille 1."""
         raw = {
-            "culture": self.culture,
+            "patrimoine": self.patrimoine,
             "nature": self.nature,
             "events": self.events,
             "attractions": self.attractions,
@@ -118,9 +120,9 @@ class TourismRecommender:
 
     def fit(self, stations: pd.DataFrame) -> "TourismRecommender":
         """Entraîne K-Means pour regrouper les gares selon leur profil touristique."""
-        # On utilise le rayon de référence de 10 km pour caractériser chaque gare
+        # On utilise le rayon de référence de 5 km pour caractériser chaque gare
         ref_columns = {
-            cat: self._get_feature_column(stations, prefix, radius_km=10)
+            cat: self._get_feature_column(stations, prefix, radius_km=5)
             for cat, prefix in CATEGORY_COLUMNS.items()
         }
         missing = set(ref_columns.values()) - set(stations.columns)
@@ -380,9 +382,38 @@ def get_top_pois_for_recommendations(
             continue
 
         top_pois = links.merge(pois, on="poi_index", how="left")
+        if criteria.event_date is not None:
+            event_rows = top_pois["category"].eq("epoi")
+            target_date = pd.Timestamp(criteria.event_date).date()
+            starts = pd.to_datetime(
+                top_pois["Date début"].astype("string").str.slice(0, 10),
+                errors="coerce",
+            ).dt.date
+            ends = pd.to_datetime(
+                top_pois["Date fin"].astype("string").str.slice(0, 10),
+                errors="coerce",
+            ).dt.date
+            ends = ends.fillna(starts)
+            active_events = (
+                starts.notna()
+                & ends.notna()
+                & starts.le(target_date)
+                & ends.ge(target_date)
+            )
+            top_pois = top_pois.loc[~event_rows | active_events].copy()
+            if top_pois.empty:
+                continue
+
         top_pois["preference"] = (
             top_pois["category"].map(POI_CATEGORY_BY_TYPE).map(prefs).fillna(0)
         )
+        allowed_categories = {category for category, preference in prefs.items() if preference > 0}
+        top_pois = top_pois[
+            top_pois["category"].map(POI_CATEGORY_BY_TYPE).isin(allowed_categories)
+        ].copy()
+        if top_pois.empty:
+            continue
+
         # Score d'attractivité : préférence utilisateur + bonus site web - éloignement
         top_pois["attractivity_score"] = (
             top_pois["preference"] * 10
@@ -404,8 +435,9 @@ def get_top_pois_for_recommendations(
         for category, quota in quotas.items():
             if quota <= 0:
                 continue
+            category_name = str(category)
             category_pois = top_pois[
-                top_pois["category"].map(POI_CATEGORY_BY_TYPE).eq(category)
+                top_pois["category"].map(POI_CATEGORY_BY_TYPE).eq(category_name)
             ].sort_values(["attractivity_score", "distance_km"], ascending=[False, True])
             selected_parts.append(category_pois.head(int(quota)))
 
@@ -437,7 +469,7 @@ def main() -> None:
 
     # Critères utilisateur simplifiés
     criteria = RecommendationCriteria(
-        culture=1.0,
+        patrimoine=1.0,
         nature=0.0,
         events=0.0,
         attractions=0.0,

@@ -1,3 +1,5 @@
+# Liste des types de POI récupérés.
+
 HIGH_VALUE_POI = [
     "Musée",
     "Château et demeure de prestige",
@@ -38,16 +40,4 @@ NATURE_POI = [
     "Cascade",
     "Canyon",
     "Volcan",
-]
-
-EVENTS = [
-    "Festival",
-    "Concert",
-    "Exposition",
-    "Spectacle",
-    "Son et lumière",
-    "Carnaval",
-    "Fête traditionnelle",
-    "Évènement culturel",
-    "Pièce de théâtre"
 ]

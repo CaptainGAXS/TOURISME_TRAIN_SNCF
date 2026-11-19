@@ -1,8 +1,9 @@
 import pandas as pd
-from poi import HIGH_VALUE_POI, NATURE_POI, EVENTS
+from poi import HIGH_VALUE_POI, NATURE_POI
 
 NAME_FILE_ATTRACTIONS = "data/raw/parcs-du-monde.csv"
 NAME_FILE_TOURISME = "data/raw/datatourisme.csv"
+NAME_FILE_EVENTS = "data/raw/evenements-agenda.csv"
 # France métropolitaine
 MIN_LATITUDE = 41.0
 MAX_LATITUDE = 51.2
@@ -96,6 +97,7 @@ def pre_traitement_attractions() -> pd.DataFrame:
 
 def obtenir_types_uniques(sep: str = ",", separateur_valeurs: str = ",") -> list[str]:
     """
+    Fonction utilitaire
     Extrait la liste triée des valeurs uniques des colonnes 'Sous-type' d'un fichier DATAtourisme.
     """
     df = pd.read_csv(
@@ -163,10 +165,44 @@ def filtrer_par_sous_types(
     return df
 
 
+def pre_traitement_evenements(nom_sortie : str) -> pd.DataFrame:
+    """Prépare les événements depuis l'export evenements-agenda."""
+    colonnes_source = [
+        "Identifiant",
+        "Titre",
+        "Première date - Début",
+        "Dernière date - Fin",
+        "Coordonnées géographiques",
+        "Site web du lieu",
+    ]
+    df = pd.read_csv(
+        NAME_FILE_EVENTS,
+        sep=";",
+        usecols=colonnes_source,
+        dtype="string",
+    )
+
+    coordonnees = df["Coordonnées géographiques"].str.split(",", n=1, expand=True)
+    df_final = pd.DataFrame(
+        {
+            "Nom": df["Titre"],
+            "Identifiant": df["Identifiant"],
+            "Latitude": coordonnees[0].str.strip(),
+            "Longitude": coordonnees[1].str.strip(),
+            "Site internet": df["Site web du lieu"],
+            "Date début": df["Première date - Début"],
+            "Date fin": df["Dernière date - Fin"],
+        }
+    )
+    df_final = nettoyer_poi(df_final)
+    df_final.to_csv(nom_sortie, index=False)
+    return df_final
+
+
 if __name__ == "__main__":
     pre_traitement_attractions()
     types = obtenir_types_uniques()
     print(types)
     filtrer_par_sous_types(HIGH_VALUE_POI, "data/hpoi.csv")
     filtrer_par_sous_types(NATURE_POI, "data/npoi.csv")
-    filtrer_par_sous_types(EVENTS, "data/epoi.csv")
+    pre_traitement_evenements("data/epoi.csv")
