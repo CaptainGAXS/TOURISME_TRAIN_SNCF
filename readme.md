@@ -27,27 +27,12 @@ python -m pip install -r requirements.txt
 ```
 
 ## Préparer les données
+Pour télécharger et préparer les données, exécuter le script `scripts/build_all_data.py` depuis la racine du projet. Il télécharge les fichiers sources et construit les fichiers nécessaires à l'application.
 
-Les données déjà préparées se trouvent dans [`data/`](data/). Pour télécharger les
-fichiers sources et reconstruire les données (afin d'avoir les dernières versions), consulter
-[`scripts/data_prep/DATA.md`](scripts/data_prep/DATA.md), puis exécuter les
-commandes indiquées depuis la racine du projet.
+```bash
+python scripts/build_all_data.py
+```
 
-En particulier, ce document explique comment :
-
-- télécharger les données des gares et de leur fréquentation ;
-- générer [`data/stations.csv`](data/stations.csv) avec `build_stations.py` ;
-- télécharger les données touristiques ;
-- générer les fichiers de points d'intérêt (`attractions_france.csv`,
-  `hpoi.csv`, `npoi.csv` et `epoi.csv`) avec
-  `pre-traitement-tourism.py`.
-- reconstruire le fichier [`data/station_transfers.csv`](data/station_transfers.csv) avec `build_station_transfers.py` ;
-- télécharger le fichier GTFS de la SNCF pour le planificateur d'itinéraire
-- construire station_poi_index.csv et poi_nearest_station.csv avec `build_proximity_indexes.py`.
-- construire les features gare-POI avec `station_features.py`.
-
-Les identifiants utilisés pendant la préparation sont lus comme du texte afin
-de conserver leurs zéros initiaux.
 
 ## Lancer le programme
 
@@ -135,7 +120,7 @@ site.
     ├── raw/                        # Sources téléchargées
     ├── stations.csv                # Liste des gares
     ├── station_features.csv        # Features touristiques des gares
-    ├── station_poi_index.csv       # Liens gare-POI
+    ├── station_poi_index.csv.gz    # Liens gare-POI compressés
     ├── poi_nearest_station.csv     # Gare la plus proche de chaque POI
     ├── hpoi.csv                   # Points culturels
     ├── npoi.csv                   # Points naturels
